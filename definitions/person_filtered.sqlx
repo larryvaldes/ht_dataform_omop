@@ -1,0 +1,8 @@
+config {
+ type: "table"
+}
+
+Select * from ${ref('person_demographics')} where name in (
+    select name from
+    ${ref('universe-person')}
+    )

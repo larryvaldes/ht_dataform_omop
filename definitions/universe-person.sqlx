@@ -1,0 +1,10 @@
+config {
+ type: "table"
+}
+
+SELECT
+  DISTINCT(user.name)
+FROM
+  `healthtree-production.HT.facilityConnections`
+WHERE
+  connectionDetails.automatic.normalizedRecords.count IS NOT NULL
