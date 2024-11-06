@@ -1,0 +1,27 @@
+config {
+ type: "table"
+}
+
+SELECT
+  user.name,
+  ext.url,
+  codeable.code AS codeableCode,
+  codeable.system AS codeableSystem,
+  codeable.display AS codeableDisplay,
+  innerExt.valueString AS innerExtValueString,
+  innerExt.url AS innerExtUrl,
+  innerExt.valueCoding.code AS innerCodingCode,
+  innerExt.valueCoding.system AS innerCodingSystem,
+  innerExt.valueCoding.display AS innerCodingDisplay,
+  innerExtCodeable.code AS innerCodeableCode,
+  innerExtCodeable.system AS innerCodeableSystem,
+  innerExtCodeable.display AS innerCodeableDisplay
+FROM
+  `healthtree-production.HT.Patient`,
+  UNNEST(fhir.extension) AS ext
+LEFT JOIN
+  UNNEST(ext.valueCodeableConcept.coding) AS codeable
+LEFT JOIN
+  UNNEST(ext.extension) AS innerExt
+LEFT JOIN
+  UNNEST(innerExt.valueCodeableConcept.coding) AS innerExtCodeable
