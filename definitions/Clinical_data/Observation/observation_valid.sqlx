@@ -1,0 +1,35 @@
+config {
+    type: "view"
+}
+with base as(
+select * from `healthtree-production.HT.Observation` where fhir is not null and user.name in
+(Select person_source_value from ${ref("allPersons")}) and (fhir.valueQuantity is null and fhir.valueRange is null)
+
+)
+
+select
+
+user.name as person_source_value,
+fhir.id as record_source_id,
+COALESCE(fhir.effectiveDateTime.string, CAST(fhir.effectiveDateTime.date_time as STRING), CAST(fhir.issued as STRING), fhir.effectivePeriod.start) as observation_DATE,
+COALESCE(CASE WHEN fhir.valueRatio.denominator.value != 0 THEN fhir.valueRatio.numerator.value / fhir.valueRatio.denominator.value
+ELSE NULL END) as value_as_number,
+COALESCE(fhir.valueCodeableConcept.text, fhir.valueCodeableConcept.text, fhir.valueCodeableConcept.coding[SAFE_OFFSET(0)].display,
+fhir.valueDateTime, fhir.valueAttachment.data, CONCAT(fhir.valueRatio.numerator.value, "/", fhir.valueRatio.denominator.value,
+fhir.valueTime)) as value_as_string,
+COALESCE(fhir.valueCodeableConcept.code, fhir.valueCodeableConcept.coding[SAFE_OFFSET(0)].code) as value_as_concept_id,
+COALESCE(fhir.valueRatio.numerator.unit, fhir.valueRatio.denominator.unit, CASE WHEN fhir.valueTime is not null
+THEN "Time" ELSE NULL END) as unit_source_value,
+COALESCE(fhir.referenceRange[SAFE_OFFSET(0)].low.value.float, fhir.referenceRange[SAFE_OFFSET(0)].low.value.integer,
+fhir.valueRange.low.value.float, fhir.valueRange.low.value.integer) as range_low,
+COALESCE(fhir.referenceRange[SAFE_OFFSET(0)].high.value.float, fhir.referenceRange[SAFE_OFFSET(0)].high.value.integer,
+fhir.valueRange.high.value, fhir.valueRange.high.value) as range_high,
+fhir.encounter.reference as visit_occurrence_reference,
+fhir.encounter.display as visit_occurrence_type,
+COALESCE(fhir.code.coding[SAFE_OFFSET(0)].display, fhir.code.text) as observation_source_value,
+COALESCE(fhir.code.coding[SAFE_OFFSET(0)].code) as observation_source_code,
+COALESCE(fhir.code.coding[SAFE_OFFSET(0)].system) as observation_source_system,
+COALESCE(fhir.category[SAFE_OFFSET(0)].text, fhir.category[SAFE_OFFSET(0)].coding[SAFE_OFFSET(0)].display) as observation_source_type,
+fhir.status as observation_source_status
+
+from base

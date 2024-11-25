@@ -1,0 +1,27 @@
+config {
+    type: "table"
+}
+
+select
+dv.person_source_value,
+ROW_NUMBER() OVER (ORDER BY (Select null)) AS device_exposure_id,
+p.person_id as person_id,
+null as device_concept_id,
+dv.device_exposure_start_DATE as device_exposure_start_DATE,
+null as device_exposure_start_DATETIME,
+dv.device_exposure_end_DATE as device_exposure_end_DATE,
+null as device_exposure_end_DATETIME,
+null as device_type_concept_id,
+dv.unique_device_id as unique_device_id,
+null as quantity,
+null as provider_id,
+null as visit_occurrence_id,
+null as visit_detail_id,
+dv.device_source_value as device_source_value,
+null as device_source_concept_id,
+
+dv.device_status_source_value as device_status_source_value,
+dv.record_source_id as record_source_id
+
+from
+${ref("device_valid")} dv join ${ref("person")} p on dv.person_source_value = p.person_source_value

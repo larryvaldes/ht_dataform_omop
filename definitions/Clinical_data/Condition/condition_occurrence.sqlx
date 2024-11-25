@@ -1,0 +1,39 @@
+config {
+    type: "table"
+}
+
+SELECT
+  c.user.name AS patient_id,
+  p.person_source_value as person_source_value,
+  c.fhir.id AS condition_source_id,
+  ROW_NUMBER() OVER (ORDER BY (Select null)) AS condition_occurrence_id,
+  p.person_id AS person_id,
+  NULL AS condition_concept_id,
+  COALESCE(c.fhir.onsetPeriod.start, c.fhir.onsetDateTime) AS condition_start_DATE,
+  NULL AS condition_start_DATETIME,
+  COALESCE(c.fhir.onsetPeriod.
+  END
+    , c.fhir.abatementDateTime) AS condition_end_DATE,
+  NULL AS condition_end_DATETIME,
+  cu.category AS condition_type_value,
+  NULL AS condition_type_concept_id,
+  NULL AS stop_reason,
+  NULL AS provider_id,
+  NULL as visit_occurrence_id,
+  cu.encounter AS visit_occurrence_reference,
+  NULL AS visit_detail_id,
+  cu.display AS condition_source_value,
+  cu.code AS condition_source_concept_id,
+  cu.system AS condition_source_system,
+  cu.status AS condition_status_source_value,
+  NULL AS condition_status_concept_id,
+  cu.fhir_id as record_source_id
+FROM (${ref("condition_valid")} c
+  LEFT JOIN
+    ${ref("person")} p
+  ON
+    c.user.name = p.person_source_value)
+JOIN
+  ${ref("conditions_unnested")} cu
+ON
+  c.fhir.id = cu.fhir_id

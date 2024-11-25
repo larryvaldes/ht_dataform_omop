@@ -1,0 +1,5 @@
+config {
+    type: "view"
+}
+
+select person_source_value from ${ref("person")} 

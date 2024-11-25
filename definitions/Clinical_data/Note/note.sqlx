@@ -1,0 +1,149 @@
+config {
+    type: "table"
+}
+
+WITH
+  drug_exposure_base AS(
+  SELECT
+    DISTINCT de.person_source_value,
+    de.person_id,
+    de.record_source_id,
+    "Drug_exposure" AS note_source_origin,
+    de.visit_occurrence_id,
+    de.drug_exposure_start_DATE,
+    mr.fhir.note[SAFE_OFFSET(0)].text AS note_text
+  FROM
+    ${ref("drug_exposure")} de
+  JOIN
+    healthtree-production.HT.MedicationRequest mr
+  ON
+    de.record_source_id = mr.fhir.id
+  WHERE
+    mr.fhir.note[SAFE_OFFSET(0)].text IS NOT NULL ),
+
+  measurement_base AS(
+  SELECT
+    DISTINCT me.person_source_value,
+    me.person_id,
+    me.record_source_id,
+    "Measurement" AS note_source_origin,
+    me.visit_occurrence_id,
+    me.measurement_DATE,
+    o.fhir.note[SAFE_OFFSET(0)].entity.text AS note_text
+  FROM
+    ${ref("measurement")} me
+  JOIN
+    healthtree-production.HT.Observation o
+  ON
+    me.record_source_id = o.fhir.id
+  WHERE
+    o.fhir.note[SAFE_OFFSET(0)].entity.text IS NOT NULL ),
+
+
+  observation_base AS(
+  SELECT
+    DISTINCT ob.person_source_value,
+    ob.person_id,
+    ob.record_source_id,
+    "Observation" AS note_source_origin,
+    ob.visit_occurrence_id,
+    ob.observation_DATE,
+    obs.fhir.note[SAFE_OFFSET(0)].entity.text AS note_text
+  FROM
+    ${ref("observation")} ob
+  JOIN
+    healthtree-production.HT.Observation obs
+  ON
+    ob.record_source_id = obs.fhir.id
+  WHERE
+    obs.fhir.note[SAFE_OFFSET(0)].entity.text IS NOT NULL ),
+
+
+  condition_occurrence_base AS (
+  SELECT
+    DISTINCT co.person_source_value,
+    co.person_id,
+    co.record_source_id,
+    "Condition" AS note_source_origin,
+    co.visit_occurrence_id,
+    co.condition_start_DATE,
+    con.fhir.notes AS note_text
+  FROM
+    ${ref("condition_occurrence")} co
+  JOIN
+    healthtree-production.HT.Condition con
+  ON
+    co.record_source_id = con.fhir.id
+  WHERE
+    con.fhir.notes IS NOT NULL ),
+
+  device_exposure_base AS (
+  SELECT
+    DISTINCT de.person_source_value,
+    de.person_id,
+    de.record_source_id,
+    "Device_exposure" AS note_source_origin,
+    de.visit_occurrence_id,
+    de.device_exposure_start_DATE,
+    dev.fhir.note[SAFE_OFFSET(0)].text AS note_text
+  FROM
+    ${ref("device_exposure")} de
+  JOIN
+    healthtree-production.HT.Device dev
+  ON
+    de.record_source_id = dev.fhir.id
+  WHERE
+    dev.fhir.note[SAFE_OFFSET(0)].text IS NOT NULL ),
+
+  procedure_base AS (
+  SELECT
+    DISTINCT po.person_source_value,
+    po.person_id,
+    po.record_source_id,
+    "Procedure_occurrence" AS note_source_origin,
+    po.visit_occurrence_id,
+    po.procedure_DATE,
+    proc.fhir.note[SAFE_OFFSET(0)].text AS note_text
+  FROM
+    ${ref("procedure_occurrence")} po
+  JOIN
+    healthtree-production.HT.Procedure proc
+  ON
+    po.record_source_id = proc.fhir.id
+  WHERE
+    proc.fhir.note[SAFE_OFFSET(0)].text IS NOT NULL )
+    /*
+    select
+
+    note_id,
+    person_id,
+    note_DATE,
+    note_DATETIME,
+    note_type_concept_id,
+    note_class_concept_id,
+    note_title,
+    note_text,
+    encoding_concept_id,
+    language_concept_id,
+    provider_id,
+    visit_occurrence_id,
+    visit_detail_id,
+    note_source_value
+
+    from ${ref("note_valid")}
+
+    */
+SELECT
+  *
+FROM
+  drug_exposure_base
+  UNION ALL
+  Select * FROM measurement_base
+  UNION ALL
+  SELECT * FROM observation_base
+  UNION ALL
+  SELECT * FROM condition_occurrence_base
+  UNION ALL 
+  SELECT * FROM procedure_base
+  UNION ALL
+  SELECT * FROM device_exposure_base

@@ -1,0 +1,38 @@
+config {
+    type: "table"
+}
+
+select
+ROW_NUMBER() OVER (ORDER BY (Select null)) as measurement_id,
+p.person_source_value as person_source_value,
+mv.record_source_id as record_source_id,
+p.person_id as person_id,
+null as measurement_concept_id,
+mv.measurement_DATE as measurement_DATE,
+null as measurement_DATETIME,
+null as measurement_time,
+null as measurement_type_concept_id,
+null as operator_concept_id,
+mv.value_as_number as value_as_number,
+null as value_as_concept_id,
+null as unit_concept_id,
+mv.range_low as range_low,
+mv.range_high as range_high,
+null as provider_id,
+null as visit_occurrence_id,
+null as visit_detail_id,
+mv.measurement_source_value as measurement_source_value,
+null as measurement_source_concept_id,
+mv.unit_source_value as unit_source_value,
+mv.value_source_value as value_source_value,
+
+mv.measurement_source_code as measurement_source_code,
+mv.measurement_source_system as measurement_source_system,
+mv.measurement_source_status as measurement_source_status,
+mv.measurement_source_type as measurement_source_type,
+
+mv.visit_occurrence_reference as visit_occurrence_reference,
+mv.visit_occurrence_type as visit_occurrence_type
+
+from 
+${ref("measurement_valid")} mv join ${ref("person")} p on mv.person_source_value = p.person_source_value

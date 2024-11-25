@@ -1,0 +1,7 @@
+config {
+    type: "view"
+}
+
+
+select * from `healthtree-production.HT.Condition` where fhir is not null and user.name in
+(Select person_source_value from ${ref("allPersons")})
