@@ -1,0 +1,73 @@
+config {
+    type: "view"
+}
+
+WITH
+  base AS (
+  SELECT
+    *
+  FROM
+    `healthtree-production.HT.Device`
+  WHERE
+    fhir IS NOT NULL
+    AND user.name IN (
+    SELECT
+      person_source_value
+    FROM
+      ${ref("allPersons")}) )
+SELECT
+  user.name AS person_source_value,
+  fhir.id AS record_source_id,
+  COALESCE( fhir.udiCarrier[SAFE_OFFSET(0)].deviceIdentifier, CONCAT( COALESCE(
+        CASE
+          WHEN fhir.modelNumber IS NOT NULL AND LOWER(fhir.modelNumber) NOT IN ("na", "n/a", "n-a") THEN fhir.modelNumber
+          WHEN (
+        SELECT
+          device.name
+        FROM
+          UNNEST(fhir.deviceName) AS device
+        WHERE
+          device.type = 'model-name' ) IS NOT NULL THEN (
+        SELECT
+          device.name
+        FROM
+          UNNEST(fhir.deviceName) AS device
+        WHERE
+          device.type = 'model-name' )
+          ELSE '0'
+      END
+        ), '//',
+      CASE
+        WHEN fhir.lotNumber IS NULL OR LOWER(fhir.lotNumber) IN ('na', 'n/a', "n-a") THEN '0'
+        ELSE fhir.lotNumber
+    END
+      , '//',
+      CASE
+        WHEN fhir.serialNumber IS NULL OR LOWER(fhir.serialNumber) IN ('na', 'n/a', "n-a") THEN '0'
+        ELSE fhir.serialNumber
+    END
+      )) AS unique_device_id,
+  CONCAT( COALESCE(
+      CASE
+        WHEN fhir.manufacturer IS NULL OR LOWER(fhir.manufacturer) IN ("na", "n/a", "n-a") THEN NULL
+        ELSE CONCAT(fhir.manufacturer, "//")
+    END
+      , CONCAT((
+        SELECT
+          devName.name
+        FROM
+          UNNEST(fhir.deviceName) AS devName
+        WHERE
+          devName.type LIKE "manufacturer-name"),"//")),
+    CASE
+      WHEN ( SELECT device.name FROM UNNEST(fhir.deviceName) AS device WHERE device.type LIKE "user-friendly-name" ) IS NOT NULL THEN ( SELECT device.name FROM UNNEST(fhir.deviceName) AS device WHERE device.type = 'user-friendly-name' ) WHEN( COALESCE( fhir.type.text, ( SELECT devType.display FROM UNNEST(fhir.type.coding) AS devType WHERE REGEXP_CONTAINS(devType.system, r'(snomed|icd-10|icd-9)') ) ) IS NOT NULL ) THEN COALESCE( fhir.type.text, ( SELECT devType.display FROM UNNEST(fhir.type.coding) AS devType WHERE REGEXP_CONTAINS(devType.system, r'(snomed|icd-10|icd-9)') ) )
+      ELSE '0'
+  END
+    ) AS device_source_value,
+  fhir.status AS device_status_source_value,
+  fhir.expirationDate AS device_exposure_end_DATE,
+  fhir.meta.lastUpdated as device_exposure_start_DATE
+FROM
+  base
+WHERE
+  fhir.status != "entered-in-error"

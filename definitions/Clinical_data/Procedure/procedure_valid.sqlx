@@ -1,0 +1,32 @@
+config {
+    type: "view"
+}
+
+with base as(
+select * from `healthtree-production.HT.Procedure` where fhir is not null and user.name in
+(Select person_source_value from ${ref("allPersons")})
+)
+
+SELECT 
+user.name as person_source_value,
+fhir.id as record_source_id,
+COALESCE(
+fhir.performedDateTime.string,
+STRING(fhir.performedDateTime.date_time),
+fhir.performedPeriod.start
+) as procedure_DATE,
+CASE WHEN STARTS_WITH(fhir.encounter.reference, "Encounter/") THEN fhir.encounter.reference
+ELSE NULL END as visit_occurrence_reference,
+fhir.status as procedure_source_status,
+COALESCE(
+    fhir.category.text
+) as procedure_source_type,
+COALESCE(fhir.code.text, (SELECT coding.display from UNNEST(fhir.code.coding) as coding where LOWER(coding.system) like "%snomed%" or
+LOWER(coding.system) like "%loinc%" or LOWER(coding.system) like "%icd-9%" or LOWER(coding.system) like "%icd-10%" limit 1)) as procedure_source_value,
+(SELECT 
+CASE WHEN coding.code.provided like "string" THEN coding.code.string
+WHEN coding.code.provided like "integer" THEN FORMAT("%d", coding.code.integer) END as code
+ from UNNEST(fhir.code.coding) as coding where LOWER(coding.system) like "%snomed%" or
+LOWER(coding.system) like "%loinc%" or LOWER(coding.system) like "%icd-9%" or LOWER(coding.system) like "%icd-10%" limit 1) as procedure_source_concept_id
+
+from base 

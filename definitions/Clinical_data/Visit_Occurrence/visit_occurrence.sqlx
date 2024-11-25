@@ -1,0 +1,25 @@
+config {
+    type: "table"
+}
+
+select
+user.name as patient_id,
+ null as visit_occurrence_id,
+ null as person_id,
+ null as visit_concept_id,
+ null as visit_start_DATE,
+ null as visit_start_DATETIME,
+ null as visit_end_DATE,
+ null as visit_end_DATETIME,
+ null as visit_type_concept_id,
+ null as provider_id,
+ null as care_site_id,
+ null as visit_source_value,
+ null as visit_source_concept_id,
+ null as admitting_source_concept_id,
+ null as admitting_source_value,
+ null as discharge_to_concept_id,
+ null as discharge_to_source_value,
+ null as preceding_visit_occurrence_id
+
+ from healthtree-production.HT.Encounter

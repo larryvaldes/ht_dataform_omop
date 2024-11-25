@@ -1,0 +1,29 @@
+config {
+    type: "table"
+}
+
+with device_exposure_base as(
+    select dev_exp.person_source_value, dev_exp.record_source_id as base_record_id, "Device_exposure" as base_record, "fhir.location.reference" as field_name, device.fhir.location.reference as reference_value from ${ref("device_exposure")} dev_exp join healthtree-production.HT.Device device on dev_exp.record_source_id = device.fhir.id
+    where device.fhir.location.reference is not null
+),
+drug_exposure_1 as(
+    select dr_ex.person_source_value, dr_ex.record_source_id as base_record_id, "Drug_exposure" as base_record, "fhir.requester.reference" as field_name, medication.fhir.requester.reference as reference_value from ${ref("drug_exposure")} dr_ex join healthtree-production.HT.MedicationRequest medication on dr_ex.record_source_id = medication.fhir.id
+    where medication.fhir.requester.reference is not null
+),
+drug_exposure_2 as (
+ select dr_ex.person_source_value, dr_ex.record_source_id as base_record_id, "Drug_exposure" as base_record, "fhir.priorPrescription.reference" as field_name, medication.fhir.priorPrescription.reference as reference_value
+ from ${ref("drug_exposure")} dr_ex join healthtree-production.HT.MedicationRequest medication on dr_ex.record_source_id = medication.fhir.id
+ where medication.fhir.priorPrescription.reference is not null
+),
+measurement as(
+    select me.person_source_value, me.record_source_id as base_record_id, "Measurement" as base_record, "fhir.specimen.reference" as field_name, obs.fhir.specimen.reference as reference_value 
+    from ${ref("measurement")} me join healthtree-production.HT.Observation obs on me.record_source_id = obs.fhir.id
+    where obs.fhir.specimen.reference is not null
+)
+select * from device_exposure_base
+union all
+select * from drug_exposure_1
+union all
+select * from drug_exposure_2
+union all
+select * from measurement

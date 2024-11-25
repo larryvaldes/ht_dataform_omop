@@ -1,0 +1,27 @@
+config {
+    type: "view"
+}
+
+with base as (
+select patient_id,
+display as ethnicity_source_value,
+code as ethnicity_source_concept_id
+from ${ref("person_demographics")} where (url like "%ethnicity%") and display is not null
+)
+
+select patient_id,
+ARRAY_AGG(CASE WHEN LOWER(ethnicity_source_value) like "%not%" or LOWER(ethnicity_source_value) like "%non%"
+THEN "Not Hispanic or Latino"
+WHEN LOWER(ethnicity_source_value) like "%unknown%" then null else ethnicity_source_value end IGNORE NULLS
+)[SAFE_OFFSET(0)] as ethnicity_source_value,
+
+ARRAY_AGG(CASE WHEN LOWER(ethnicity_source_value) like "%not%" or LOWER(ethnicity_source_value) like "%non%"
+THEN "38003564"
+WHEN LOWER(ethnicity_source_value) like "%unknown%" then null else ethnicity_source_concept_id end IGNORE NULLS
+)[SAFE_OFFSET(0)] as ethnicity_source_concept_id
+
+from base
+group by patient_id
+
+
+

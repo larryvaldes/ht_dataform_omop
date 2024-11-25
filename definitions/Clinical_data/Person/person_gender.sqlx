@@ -1,0 +1,27 @@
+config {
+    type: "view"
+}
+
+with base as (
+select patient_id,
+CASE WHEN LOWER(display) in ("unknown", "other") THEN null
+    WHEN LOWER(display) like "% male%" or LOWER(display) like "%masculine%" or LOWER(display) like "m" then "male"
+    WHEN LOWER(display) like "%female%" or LOWER(display) like "%feminine%" or LOWER(display) like "f" then "female"
+ELSE display END as gender_source_value,
+display
+from ${ref("person_demographics")} where (url like "%gender%" or url like "%sex%") and display is not null
+)
+
+SELECT 
+    patient_id,
+    CASE 
+        WHEN MAX(CASE WHEN LOWER(gender_source_value) IN ('male', 'm') THEN 'male' ELSE NULL END) IS NOT NULL THEN 'male'
+        WHEN MAX(CASE WHEN LOWER(gender_source_value) IN ('female', 'f') THEN 'female' ELSE NULL END) IS NOT NULL THEN 'female'
+        ELSE NULL -- If neither male nor female is found, return NULL
+    END AS gender_source_value
+FROM 
+    base
+GROUP BY 
+    patient_id
+
+

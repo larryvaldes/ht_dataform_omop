@@ -1,10 +1,10 @@
 config {
- type: "table"
+    type: "view"
 }
 
 SELECT
-  DISTINCT(user.name)
+  DISTINCT(user.name) as patient_id
 FROM
   `healthtree-production.HT.facilityConnections`
 WHERE
-  connectionDetails.automatic.normalizedRecords.count IS NOT NULL
+  connectionDetails.automatic.normalizedRecords.count IS NOT NULL and user.name is not null

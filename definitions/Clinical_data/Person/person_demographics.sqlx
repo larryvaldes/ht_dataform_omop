@@ -1,0 +1,44 @@
+config {
+ type: "view"
+}
+with base as(
+SELECT
+  user.name as patient_id,
+  ext.url,
+  ext.valueCode,
+  codeable.code AS codeableCode,
+  codeable.system AS codeableSystem,
+  codeable.display AS codeableDisplay,
+  innerExt.valueString AS innerExtValueString,
+  innerExt.valueCoding.code AS innerCodingCode,
+  innerExt.valueCoding.system AS innerCodingSystem,
+  innerExt.valueCoding.display AS innerCodingDisplay,
+  innerExtCodeable.code AS innerCodeableCode,
+  innerExtCodeable.system AS innerCodeableSystem,
+  innerExtCodeable.display AS innerCodeableDisplay
+FROM
+  `healthtree-production.HT.Patient`,
+  UNNEST(fhir.extension) AS ext
+LEFT JOIN
+  UNNEST(ext.valueCodeableConcept.coding) AS codeable
+LEFT JOIN
+  UNNEST(ext.extension) AS innerExt
+LEFT JOIN
+  UNNEST(innerExt.valueCodeableConcept.coding) AS innerExtCodeable
+)
+
+select patient_id, url, codeableCode as code, codeableSystem as system, codeableDisplay as display from base
+where codeableCode is not null or codeableDisplay is not null
+UNION ALL
+select patient_id, url, null as code, null as system, innerExtValueString as display from base
+where innerExtValueString is not null
+UNION ALL
+select patient_id, url, innerCodingCode as code, innerCodingSystem as system, innerCodingDisplay as display from base
+where innerCodingCode is not null or innerCodingDisplay is not null
+UNION ALL
+select patient_id, url, innerCodeableCode as code, innerCodeableSystem as system, innerCodeableDisplay as display from base
+where innerCodeableCode is not null or innerCodeableDisplay is not null
+UNION ALL
+select patient_id, url, valueCode as code, null as system, valueCode as display from base
+where valueCode is not null
+

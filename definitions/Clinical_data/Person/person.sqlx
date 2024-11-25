@@ -1,0 +1,65 @@
+config {
+    type: "table"
+}
+
+with person_base as(
+select
+distinct
+ROW_NUMBER() OVER (ORDER BY (Select null)) as person_id,
+COALESCE(
+    CASE WHEN p.fhir.gender is not null and LOWER(p.fhir.gender) not like "%other%" and LOWER(p.fhir.gender) not like "%unknown%" then 
+    CASE WHEN LOWER(p.fhir.gender) like "male" or LOWER(p.fhir.gender) like "m" then 8507
+         WHEN LOWER(p.fhir.gender) like "female" or LOWER(p.fhir.gender) like "f" then 8532 END
+    ELSE null END,
+    CASE WHEN pg.gender_source_value like "male" then 8507
+        WHEN pg.gender_source_value like "female" then 8532 END
+) as gender_concept_id,
+EXTRACT(YEAR FROM CAST(p.fhir.birthDate AS DATE)) as year_of_birth,
+EXTRACT(MONTH FROM CAST(p.fhir.birthDate AS DATE)) as month_of_birth,
+EXTRACT(DAY FROM CAST(p.fhir.birthDate AS DATE)) as day_of_birth,
+null as birth_DATETIME,
+null as race_concept_id,
+null as ethnicity_concept_id,
+null as location_id,
+null as provider_id,
+null as care_site_id,
+u.patient_id as person_source_value,
+COALESCE(
+    CASE WHEN p.fhir.gender is not null and LOWER(p.fhir.gender) not like "%other%" and LOWER(p.fhir.gender) not like "%unknown%" then 
+    CASE WHEN LOWER(p.fhir.gender) like "male" or LOWER(p.fhir.gender) like "m" then "male"
+         WHEN LOWER(p.fhir.gender) like "female" or LOWER(p.fhir.gender) like "f" then "female" END
+    ELSE null END,
+    pg.gender_source_value
+) as gender_source_value,
+null as gender_source_concept_id,
+pr.race_source_value as race_source_value,
+pr.race_source_concept_id as race_source_concept_id,
+pe.ethnicity_source_value as ethnicity_source_value,
+pe.ethnicity_source_concept_id as ethnicity_source_concept_id
+
+from (${ref("universe-person")} u join 
+(select * from `healthtree-production.HT.Patient` where fhir is not null) p
+on u.patient_id = p.user.name) left join ${ref("person_gender")} pg on u.patient_id = pg.patient_id left join ${ref("person_race")} pr
+on u.patient_id = pr.patient_id left join ${ref("person_ethnicity")} pe on u.patient_id = pe.patient_id
+)
+
+
+select ARRAY_AGG(person_id)[SAFE_OFFSET(0)] as person_id,
+person_source_value,
+ ARRAY_AGG(gender_concept_id)[SAFE_OFFSET(0)] as gender_concept_id,
+ ARRAY_AGG(year_of_birth)[SAFE_OFFSET(0)] as year_of_birth,
+ ARRAY_AGG(month_of_birth)[SAFE_OFFSET(0)] as month_of_birth,
+ ARRAY_AGG(day_of_birth)[SAFE_OFFSET(0)] as day_of_birth,
+ ARRAY_AGG(birth_DATETIME)[SAFE_OFFSET(0)] as birth_DATETIME,
+ ARRAY_AGG(race_concept_id)[SAFE_OFFSET(0)] as race_concept_id,
+ ARRAY_AGG(ethnicity_concept_id)[SAFE_OFFSET(0)] as ethnicity_concept_id,
+ ARRAY_AGG(location_id)[SAFE_OFFSET(0)] as location_id,
+ ARRAY_AGG(provider_id)[SAFE_OFFSET(0)] as provider_id,
+ ARRAY_AGG(care_site_id)[SAFE_OFFSET(0)] as care_site_id,
+ ARRAY_AGG(gender_source_value)[SAFE_OFFSET(0)] as gender_source_value,
+ ARRAY_AGG(gender_source_concept_id)[SAFE_OFFSET(0)] as gender_source_concept_id,
+ ARRAY_AGG(race_source_value)[SAFE_OFFSET(0)] as race_source_value,
+ ARRAY_AGG(race_source_concept_id)[SAFE_OFFSET(0)] as race_source_concept_id,
+ ARRAY_AGG(ethnicity_source_value)[SAFE_OFFSET(0)] as ethnicity_source_value,
+ ARRAY_AGG(ethnicity_source_concept_id)[SAFE_OFFSET(0)] as ethnicity_source_concept_id,
+ from person_base group by person_source_value

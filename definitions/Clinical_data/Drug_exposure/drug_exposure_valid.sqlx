@@ -1,0 +1,59 @@
+config {
+    type: "view"
+}
+WITH
+  base AS (
+  SELECT
+    *
+  FROM
+    `healthtree-production.HT.MedicationRequest`
+  WHERE
+    fhir IS NOT NULL
+    AND user.name IN (
+    SELECT
+      person_source_value
+    FROM
+      ${ref("allPersons")}) )
+
+
+select user.name as person_source_value,
+fhir.id as record_source_id,
+coalesce(
+  fhir.medicationCodeableConcept.coding[SAFE_OFFSET(0)].code.string,
+  fhir.contained[SAFE_OFFSET(0)].ingredient[SAFE_OFFSET(0)].itemCodeableConcept.coding[SAFE_OFFSET(0)].code,
+  fhir.medicationReference.reference
+) as drug_source_code,
+coalesce(
+  fhir.medicationCodeableConcept.coding[SAFE_OFFSET(0)].display,
+  fhir.contained[SAFE_OFFSET(0)].ingredient[SAFE_OFFSET(0)].itemCodeableConcept.coding[SAFE_OFFSET(0)].display,
+  fhir.medicationReference.display
+) as drug_source_value,
+coalesce(
+  fhir.medicationCodeableConcept.coding[SAFE_OFFSET(0)].system,
+  fhir.contained[SAFE_OFFSET(0)].ingredient[SAFE_OFFSET(0)].itemCodeableConcept.coding[SAFE_OFFSET(0)].system
+) as drug_source_system,
+coalesce(
+  fhir.dosageInstruction[SAFE_OFFSET(0)].timing.repeat.boundsPeriod.start, fhir.dispenseRequest.validityPeriod.start,
+  fhir.authoredOn
+  ) as drug_exposure_start_DATE,
+  coalesce(
+  fhir.dosageInstruction[SAFE_OFFSET(0)].timing.repeat.boundsPeriod.end, fhir.dispenseRequest.validityPeriod.end
+  ) as drug_exposure_end_DATE,
+  COALESCE(fhir.dispenseRequest.quantity.value.integer, fhir.dispenseRequest.quantity.value.float,
+  fhir.dosageInstruction[SAFE_OFFSET(0)].doseAndRate[SAFE_OFFSET(0)].doseQuantity.value.integer,
+  fhir.dosageInstruction[SAFE_OFFSET(0)].doseAndRate[SAFE_OFFSET(0)].doseQuantity.value.float) as quantity,
+  COALESCE(fhir.dispenseRequest.quantity.unit, fhir.dosageInstruction[SAFE_OFFSET(0)].doseAndRate[SAFE_OFFSET(0)].doseQuantity.unit.string,
+  CAST(fhir.dosageInstruction[SAFE_OFFSET(0)].doseAndRate[SAFE_OFFSET(0)].doseQuantity.unit.integer as STRING)) as dose_unit_source_value,
+  CASE WHEN fhir.dispenseRequest.expectedSupplyDuration.code like "d" THEN fhir.dispenseRequest.expectedSupplyDuration.value
+  ELSE NULL END as days_supply,
+  fhir.encounter.reference as visit_occurrence_reference,
+  fhir.encounter.display as visit_occurrence_type,
+fhir.category[SAFE_OFFSET(0)].text as drug_source_category,
+fhir.status as drug_source_status,
+COALESCE(fhir.dosageInstruction[SAFE_OFFSET(0)].route.text, fhir.dosageInstruction[SAFE_OFFSET(0)].route.coding[SAFE_OFFSET(0)].display)
+as route_source_value,
+COALESCE(fhir.dosageInstruction[SAFE_OFFSET(0)].route.coding[SAFE_OFFSET(0)].code) as route_source_code,
+from `healthtree-production.HT.MedicationRequest`
+where fhir is not null and source.name != "HEALTH_TREE" and
+(fhir.medicationCodeableConcept is not null or fhir.medicationReference is not null or ARRAY_LENGTH(fhir.contained) > 0)
+and fhir.status != "entered-in-error"

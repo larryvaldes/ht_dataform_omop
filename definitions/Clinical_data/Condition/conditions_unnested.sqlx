@@ -1,0 +1,84 @@
+config {
+    type: "view"
+}
+
+WITH exploded_data AS (
+  -- Step 1: Unnest the fhir.code.coding array while keeping the original index and record id
+  SELECT
+  user.name as person_source_value,
+    fhir.id as fhir_id, -- Replace with your unique record identifier
+    OFFSET AS array_index,
+    coding.system,
+    coding.code,
+    COALESCE(fhir.code.text, coding.display) as display,
+    SPLIT(fhir.encounter.reference, '/')[OFFSET(1)] AS encounter,
+    COALESCE(fhir.clinicalStatus.string, fhir.clinicalStatus.entity.text, fhir.clinicalStatus.entity.coding[SAFE_OFFSET(0)].display,
+    fhir.clinicalStatus.entity.coding[SAFE_OFFSET(0)].code) as status,
+    ARRAY_TO_STRING(ARRAY(SELECT cat.text FROM UNNEST(fhir.category) AS cat), '/') AS category
+  FROM 
+    ${ref("condition_valid")}, -- Replace with your table details
+    UNNEST(fhir.code.coding) AS coding WITH OFFSET
+),
+
+filtered_data AS (
+  -- Step 2: Filter for standard codes based on the system field
+  SELECT
+  person_source_value,
+    fhir_id,
+    array_index,
+    system,
+    code,
+    display,
+    encounter,
+    status,
+    category
+  FROM
+    exploded_data
+  WHERE
+    (LOWER(system) LIKE '%snomed%' AND code != "305058001") OR
+    LOWER(system) LIKE '%icd-9%' OR
+    LOWER(system) LIKE '%icd-10%' OR
+    LOWER(system) LIKE "%urn:oid:2.16.840.1.113883.6.96%" OR --SNOMED OID
+    LOWER(system) LIKE "%urn:oid:2.16.840.1.113883.6.103%" OR --ICD-9 OID
+    LOWER(system) LIKE "%urn:oid:2.16.840.1.113883.6.3%" OR --ICD-10 OID
+    LOWER(system) LIKE "%urn:oid:2.16.840.1.113883.6.90%" --LOINC OID
+),
+
+-- THIS checks that only Condition records with "Data Absent" are excluded, and every record has a proper Code 
+--select distinct fhir_id from exploded_data where fhir_id not in (select distinct fhir_id from filtered_data)
+
+deduplicated_data AS (
+  -- Step 3: Deduplicate data to keep only one code per original record
+  SELECT
+  person_source_value,
+    fhir_id,
+    array_index,
+    system,
+    code,
+    display,
+    encounter,
+    status,
+    category,
+    ROW_NUMBER() OVER (PARTITION BY fhir_id ORDER BY array_index) AS row_num
+  FROM
+    filtered_data
+)
+
+SELECT
+person_source_value,
+  fhir_id,
+  array_index,
+  system,
+  code,
+  display,
+  encounter,
+  status,
+  category
+FROM
+  deduplicated_data
+WHERE
+  row_num = 1
+
+--This checks that every record keeps a unique code and no record was
+--select distinct fhir_id from deduplicated_data
+

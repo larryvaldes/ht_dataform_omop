@@ -1,0 +1,35 @@
+config {
+    type: "view"
+}
+
+with base as (
+select patient_id,
+display as race_source_value,
+code as race_source_concept_id
+from ${ref("person_demographics")} where (url like "%race%") and display is not null
+)
+
+SELECT 
+    patient_id,
+    ARRAY_AGG(CASE WHEN LOWER(race_source_value) like "%white%" or LOWER(race_source_value) like "%black%"
+    or LOWER(race_source_value) like "%asian%" or LOWER(race_source_value) like "%african%" then race_source_value
+    WHEN LOWER(race_source_value) like "%unknown%" or LOWER(race_source_value) like "%other%" or
+    LOWER(race_source_value) like "%decline%" then null
+    else race_source_value end
+    IGNORE NULLS)[SAFE_OFFSET(0)]
+    AS race_source_value,
+
+    ARRAY_AGG(CASE WHEN LOWER(race_source_value) like "%white%" or LOWER(race_source_value) like "%black%"
+    or LOWER(race_source_value) like "%asian%" or LOWER(race_source_value) like "%african%" then race_source_concept_id
+    WHEN LOWER(race_source_value) like "%unknown%" or LOWER(race_source_value) like "%other%" or
+    LOWER(race_source_value) like "%decline%" then null
+    else race_source_concept_id end
+    IGNORE NULLS)[SAFE_OFFSET(0)]
+    AS race_source_concept_id
+FROM 
+    base
+GROUP BY 
+    patient_id
+
+
+
