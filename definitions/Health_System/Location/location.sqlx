@@ -1,0 +1,14 @@
+config {
+    type: "table"
+}
+
+select
+
+null as location_id,
+null as address_1,
+null as address_2,
+null as city,
+null as state,
+null as zip,
+null as county,
+null as location_source_value

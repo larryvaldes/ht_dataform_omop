@@ -1,0 +1,11 @@
+config {
+    type: "table"
+}
+
+select
+null as care_site_id,
+null as care_site_name,
+null as place_of_service_concept_id,
+null as location_id,
+null as care_site_source_value,
+null as place_of_service_source_value

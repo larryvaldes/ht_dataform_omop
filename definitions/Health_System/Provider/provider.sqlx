@@ -1,0 +1,18 @@
+config {
+    type: "table"
+}
+
+select
+ null as provider_id,
+ null as provider_name,
+ null as npi,
+ null as dea,
+ null as specialty_concept_id,
+ null as care_site_id,
+ null as year_of_birth,
+ null as gender_concept_id,
+ null as provider_source_value,
+ null as specialty_source_value,
+ null as specialty_source_concept_id,
+ null as gender_source_value,
+ null as gender_source_concept_id

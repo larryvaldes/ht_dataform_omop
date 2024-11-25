@@ -1,0 +1,1 @@
+select * from ${ref("person")} where person_source_value like "B1r2iLfz5US1I1zjOKXdPQSTvAY2"

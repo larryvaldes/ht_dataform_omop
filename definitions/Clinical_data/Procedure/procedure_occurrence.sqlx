@@ -1,0 +1,31 @@
+config {
+    type: "table"
+}
+
+Select
+pv.person_source_value as person_source_value,
+pv.record_source_id as record_source_id,
+ ROW_NUMBER() OVER (ORDER BY (Select null)) as procedure_occurrence_id,
+ p.person_id as person_id,
+ null as procedure_concept_id,
+ pv.procedure_DATE as procedure_DATE,
+ null as procedure_DATETIME,
+ null as procedure_type_concept_id,
+ null as modifier_concept_id,
+ null as quantity,
+ null as provider_id,
+ null as visit_occurrence_id,
+
+pv.visit_occurrence_reference as visit_occurrence_reference,
+
+ null as visit_detail_id,
+ pv.procedure_source_value as procedure_source_value,
+ pv.procedure_source_concept_id as procedure_source_concept_id,
+ null as modifier_source_value,
+
+ pv.procedure_source_type as procedure_source_type,
+ pv.procedure_source_status as procedure_source_status
+
+ from
+
+ ${ref("procedure_valid")} pv join ${ref("person")} p on pv.person_source_value = p.person_source_value
