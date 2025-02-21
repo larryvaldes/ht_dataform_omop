@@ -19,7 +19,7 @@ null as unit_concept_id,
 mv.range_low as range_low,
 mv.range_high as range_high,
 null as provider_id,
-null as visit_occurrence_id,
+vo.visit_occurrence_id as visit_occurrence_id,
 null as visit_detail_id,
 mv.measurement_source_value as measurement_source_value,
 null as measurement_source_concept_id,
@@ -36,3 +36,4 @@ mv.visit_occurrence_type as visit_occurrence_type
 
 from 
 ${ref("measurement_valid")} mv join ${ref("person")} p on mv.person_source_value = p.person_source_value
+LEFT JOIN ${ref("visit_occurrence")} vo ON mv.visit_occurrence_reference = vo.record_source_id

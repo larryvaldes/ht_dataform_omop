@@ -8,3 +8,8 @@ FROM
   `healthtree-production.HT.facilityConnections`
 WHERE
   connectionDetails.automatic.normalizedRecords.count IS NOT NULL and user.name is not null
+  and
+  user.name not in (
+    SELECT userId FROM HT.users WHERE (email LIKE '%healthtree.org%' AND email NOT LIKE "jenny@healthtree.org")
+    OR email LIKE '%deleted.com%'
+  )

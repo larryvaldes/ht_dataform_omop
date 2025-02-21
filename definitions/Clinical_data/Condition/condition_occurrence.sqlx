@@ -3,7 +3,6 @@ config {
 }
 
 SELECT
-  c.user.name AS patient_id,
   p.person_source_value as person_source_value,
   c.fhir.id AS condition_source_id,
   ROW_NUMBER() OVER (ORDER BY (Select null)) AS condition_occurrence_id,

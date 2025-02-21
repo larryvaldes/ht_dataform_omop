@@ -29,6 +29,8 @@ ov.visit_occurrence_type as visit_occurrence_type,
 ov.observation_source_code as observation_source_code,
 ov.observation_source_system as observation_source_system,
 ov.observation_source_type as observation_source_type,
-ov.observation_source_status as observation_source_status
+ov.observation_source_status as observation_source_status,
+ov.range_low as range_low,
+ov.range_high as range_high
 
 from ${ref("observation_valid")} ov join ${ref("person")} p on ov.person_source_value = p.person_source_value

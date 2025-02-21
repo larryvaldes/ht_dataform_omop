@@ -15,12 +15,16 @@ fhir.performedDateTime.string,
 STRING(fhir.performedDateTime.date_time),
 fhir.performedPeriod.start
 ) as procedure_DATE,
-CASE WHEN STARTS_WITH(fhir.encounter.reference, "Encounter/") THEN fhir.encounter.reference
-ELSE NULL END as visit_occurrence_reference,
+CASE WHEN STARTS_WITH(fhir.encounter.reference, "Encounter/") THEN 
+  SPLIT(fhir.encounter.reference, "Encounter/")[OFFSET(1)]
+ELSE 
+  NULL 
+END AS visit_occurrence_reference,
 fhir.status as procedure_source_status,
 COALESCE(
-    fhir.category.text
+    fhir.category.text, (SELECT coding.display from UNNEST(fhir.category.coding) as coding)
 ) as procedure_source_type,
+(SELECT coding.code from UNNEST(fhir.category.coding) as coding) as procedure_source_type_code,
 COALESCE(fhir.code.text, (SELECT coding.display from UNNEST(fhir.code.coding) as coding where LOWER(coding.system) like "%snomed%" or
 LOWER(coding.system) like "%loinc%" or LOWER(coding.system) like "%icd-9%" or LOWER(coding.system) like "%icd-10%" limit 1)) as procedure_source_value,
 (SELECT 

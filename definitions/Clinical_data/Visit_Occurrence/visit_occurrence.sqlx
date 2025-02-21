@@ -3,23 +3,27 @@ config {
 }
 
 select
-user.name as patient_id,
- null as visit_occurrence_id,
- null as person_id,
+p.person_id as person_id,
+p.person_source_value as person_source_value,
+vv.record_source_id as record_source_id,
+ROW_NUMBER() OVER (ORDER BY (Select null))  as visit_occurrence_id,
  null as visit_concept_id,
- null as visit_start_DATE,
- null as visit_start_DATETIME,
- null as visit_end_DATE,
- null as visit_end_DATETIME,
- null as visit_type_concept_id,
- null as provider_id,
- null as care_site_id,
- null as visit_source_value,
- null as visit_source_concept_id,
- null as admitting_source_concept_id,
- null as admitting_source_value,
- null as discharge_to_concept_id,
- null as discharge_to_source_value,
- null as preceding_visit_occurrence_id
+vv.visit_start_DATE as visit_start_DATE,
+vv.visit_start_DATETIME as visit_start_DATETIME,
+vv.visit_end_DATE as visit_end_DATE,
+vv.visit_end_DATETIME as visit_end_DATETIME,
+vv.visit_type_concept_id as visit_type_concept_id,
+vv.provider_id as provider_id,
+vv.provider_source_value as provider_source_value,
+vv.care_site_id as care_site_id,
+vv.care_site_source as care_site_source_value,
+vv.visit_source_value as visit_source_value,
+vv.visit_source_concept_id as visit_source_concept_id,
+vv.admitting_source_concept_id as admitting_source_concept_id,
+vv.admitting_source_value as admitting_source_value,
+vv.discharge_to_concept_id as discharge_to_concept_id,
+vv.discharge_to_source_value as discharge_to_source_value,
+vv.preceding_visit_occurrence_id as preceding_visit_occurrence_id
 
- from healthtree-production.HT.Encounter
+FROM
+ ${ref("visit_valid")} vv join ${ref("person")} p on vv.person_source_value = p.person_source_value

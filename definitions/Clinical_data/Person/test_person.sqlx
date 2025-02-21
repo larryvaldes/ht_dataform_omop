@@ -1,1 +1,11 @@
-select * from ${ref("person")} where person_source_value like "B1r2iLfz5US1I1zjOKXdPQSTvAY2"
+with bigger_set as (
+select patient_id from ${ref("universe-person")}
+),
+
+smaller_set as (
+    select person_source_value as patient_id from ${ref("allPersons")}
+)
+
+SELECT patient_id
+FROM bigger_set
+WHERE patient_id NOT IN (SELECT * FROM smaller_set)
