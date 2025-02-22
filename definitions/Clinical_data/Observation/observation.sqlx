@@ -7,7 +7,7 @@ ROW_NUMBER() OVER (ORDER BY (Select null)) as observation_id,
 p.person_source_value as person_source_value,
 ov.record_source_id as record_source_id,
 p.person_id as person_id,
-null as observation_concept_id,
+COALESCE(concept.concept_id, 0) as observation_concept_id,
 ov.observation_DATE as observation_DATE,
 null as observation_DATETIME,
 null as observation_type_concept_id,
@@ -34,3 +34,6 @@ ov.range_low as range_low,
 ov.range_high as range_high
 
 from ${ref("observation_valid")} ov join ${ref("person")} p on ov.person_source_value = p.person_source_value
+LEFT JOIN `healthtree-production.OMOP.Concept` concept ON
+concept.concept_code = ov.observation_source_code
+AND LOWER(ov.observation_source_system) LIKE '%' || LOWER(concept.vocabulary_id) || '%'

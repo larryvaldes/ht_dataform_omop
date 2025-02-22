@@ -7,7 +7,7 @@ ROW_NUMBER() OVER (ORDER BY (Select null)) as drug_exposure_id,
 p.person_id as person_id,
 p.person_source_value as person_source_value,
 dv.record_source_id as record_source_id,
-null as drug_concept_id,
+COALESCE(concept.concept_id, 0) as drug_concept_id,
 dv.drug_exposure_start_DATE as drug_exposure_start_DATE,
 null as drug_exposure_start_DATETIME,
 dv.drug_exposure_end_DATE as drug_exposure_end_DATE,
@@ -36,5 +36,9 @@ dv.drug_source_system as drug_source_system,
 dv.drug_source_status as drug_source_status,
 dv.drug_source_category as drug_source_category
 
-
 from ${ref("drug_exposure_valid")} dv join ${ref("person")} p on dv.person_source_value = p.person_source_value
+LEFT JOIN ${ref("vocabulary_mapping")} vm ON
+LOWER(dv.drug_source_system) LIKE "%" || LOWER(vm.search_record) || "%"
+LEFT JOIN `healthtree-production.OMOP.Concept` concept ON
+concept.concept_code = dv.drug_source_code
+AND  LOWER(concept.vocabulary_id) LIKE '%' || LOWER(vm.vocabulary_name) || '%'

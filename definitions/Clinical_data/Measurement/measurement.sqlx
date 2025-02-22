@@ -7,7 +7,7 @@ ROW_NUMBER() OVER (ORDER BY (Select null)) as measurement_id,
 p.person_source_value as person_source_value,
 mv.record_source_id as record_source_id,
 p.person_id as person_id,
-null as measurement_concept_id,
+COALESCE(concept.concept_id, 0) as measurement_concept_id,
 mv.measurement_DATE as measurement_DATE,
 null as measurement_DATETIME,
 null as measurement_time,
@@ -37,3 +37,6 @@ mv.visit_occurrence_type as visit_occurrence_type
 from 
 ${ref("measurement_valid")} mv join ${ref("person")} p on mv.person_source_value = p.person_source_value
 LEFT JOIN ${ref("visit_occurrence")} vo ON mv.visit_occurrence_reference = vo.record_source_id
+LEFT JOIN `healthtree-production.OMOP.Concept` concept ON
+concept.concept_code = mv.measurement_source_code
+AND LOWER(mv.measurement_source_system) LIKE '%' || LOWER(concept.vocabulary_id) || '%'

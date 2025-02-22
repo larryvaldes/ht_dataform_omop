@@ -7,7 +7,7 @@ SELECT
   c.fhir.id AS condition_source_id,
   ROW_NUMBER() OVER (ORDER BY (Select null)) AS condition_occurrence_id,
   p.person_id AS person_id,
-  NULL AS condition_concept_id,
+  COALESCE(concept.concept_id, 0) AS condition_concept_id,
   COALESCE(c.fhir.onsetPeriod.start, c.fhir.onsetDateTime) AS condition_start_DATE,
   NULL AS condition_start_DATETIME,
   COALESCE(c.fhir.onsetPeriod.
@@ -36,3 +36,10 @@ JOIN
   ${ref("conditions_unnested")} cu
 ON
   c.fhir.id = cu.fhir_id
+LEFT JOIN ${ref("vocabulary_mapping")} vm ON
+LOWER(cu.system) LIKE "%" || LOWER(vm.search_record) ||"%"
+
+LEFT JOIN `healthtree-production.OMOP.Concept` concept ON
+concept.concept_code = cu.code
+AND LOWER(vm.vocabulary_name) LIKE '%' || LOWER(concept.vocabulary_id) || '%'
+

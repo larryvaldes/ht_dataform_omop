@@ -5,20 +5,20 @@ config {
 SELECT
   *
 FROM
-  UNNEST([ STRUCT("SNOMED CT" AS vocabulary_name,
+  UNNEST([ STRUCT("SNOMED" AS vocabulary_name,
       "urn:oid:2.16.840.1.113883.6.96" AS urn_oid,
       "Systematized Nomenclature of Medicine - Clinical Terms" AS description,
       "snomed" AS search_record), 
       
-      STRUCT("ICD-9",
+      STRUCT("ICD9CM",
       "urn:oid:2.16.840.1.113883.6.103",
       "International Classification of Diseases, 9th Revision",
-      ""), 
+      "icd-9-cm"), 
       
-      STRUCT("ICD-10",
+      STRUCT("ICD10CM",
       "urn:oid:2.16.840.1.113883.6.3",
       "International Classification of Diseases, 10th Revision",
-      ""), 
+      "icd-10-cm"), 
       
       STRUCT("LOINC",
       "urn:oid:2.16.840.1.113883.6.1",
@@ -30,27 +30,23 @@ FROM
       "Normalized naming system for generic and branded drugs",
       "rxnorm"), 
       
-      STRUCT("CPT",
+      STRUCT("CPT4",
       "urn:oid:2.16.840.1.113883.6.12",
       "Current Procedural Terminology",
-      ""), 
-      
-      STRUCT("HL7",
-      "urn:oid:2.16.840.1.113883.6.285",
-      "Health Level Seven, a set of international standards for transfer of clinical and administrative data",
-      ""), 
+      "cpt"), 
+    
       
       STRUCT("NDC",
       "urn:oid:2.16.840.1.113883.6.69",
       "National Drug Code",
-      ""), 
+      "nomatchpleaseeeee"), 
       
       STRUCT("CVX",
       "urn:oid:2.16.840.1.113883.12.292",
       "Vaccines Administered",
-      ""), 
+      "nomatchpleaseeeee"), 
       
       STRUCT("UCUM",
       "urn:oid:2.16.840.1.113883.6.8",
       "Unified Code for Units of Measure",
-      "") ])
+      "nomatchpleaseeeee") ])
