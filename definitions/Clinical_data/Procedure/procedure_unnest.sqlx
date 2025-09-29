@@ -3,19 +3,39 @@ config {
 }
 
 with base as(
-select * from `healthtree-production.HT.Procedure` where fhir is not null and user.name in
+select * from `healthtree-production.HT_test_sync.apps-curehub-medicalResources-r4-Procedure` where fhir is not null and user.id in
 (Select person_source_value from ${ref("allPersons")})
 ),
 
 intermediate as (
 SELECT 
-user.name as person_source_value,
+user.id as person_source_value,
 fhir.id as record_source_id,
-COALESCE(
-fhir.performedDateTime.string,
-STRING(fhir.performedDateTime.date_time),
-fhir.performedPeriod.start
-) as procedure_DATE,
+
+SAFE.PARSE_DATE(
+    '%Y-%m-%d',
+    CASE
+      -- 2022          → 2022-01-01
+      WHEN REGEXP_CONTAINS(fhir.performedDateTime, r'^\d{4}$')
+        THEN CONCAT(fhir.performedDateTime, '-01-01')
+
+      -- 2022-03       → 2022-03-01
+      WHEN REGEXP_CONTAINS(fhir.performedDateTime, r'^\d{4}-\d{2}$')
+        THEN CONCAT(fhir.performedDateTime, '-01')
+
+      -- 2022-03-15    → 2022-03-15
+      WHEN REGEXP_CONTAINS(fhir.performedDateTime, r'^\d{4}-\d{2}-\d{2}$')
+        THEN fhir.performedDateTime
+
+      -- 2022-03-15 ... (cualquier fecha-hora) → usa solo los 10 primeros char
+      WHEN REGEXP_CONTAINS(fhir.performedDateTime, r'^\d{4}-\d{2}-\d{2}[ T]')
+        THEN SUBSTR(fhir.performedDateTime, 1, 10)
+
+      ELSE NULL   -- Todo lo demás (foo, cadenas vacías, etc.)
+    END
+  )
+
+ as procedure_DATE,
 CASE WHEN STARTS_WITH(fhir.encounter.reference, "Encounter/") THEN 
   SPLIT(fhir.encounter.reference, "Encounter/")[OFFSET(1)]
 ELSE 
@@ -28,16 +48,12 @@ COALESCE(
 (SELECT coding.code from UNNEST(fhir.category.coding) as coding) as procedure_source_type_code,
 coding.system as procedure_source_system,
 coding.display as procedure_source_value,
-coding.code.provided as procedure_source_provided,
-coding.code.integer as procedure_source_integer,
-coding.code.string as procedure_source_string
+coding.code as procedure_source_code
 
 FROM base, UNNEST(fhir.code.coding) as coding
 )
 
-SELECT * EXCEPT(procedure_source_provided, procedure_source_integer, procedure_source_string),
-CASE WHEN procedure_source_provided LIKE "string" THEN procedure_source_string
-WHEN procedure_source_provided LIKE "integer" THEN CAST(procedure_source_integer AS STRING)
-END AS procedure_source_concept_id
+SELECT * EXCEPT(procedure_source_code),
+procedure_source_code AS procedure_source_concept_id
 FROM intermediate
 

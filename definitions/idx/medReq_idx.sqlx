@@ -1,0 +1,41 @@
+config { type: "view" }
+
+-- id, subject_ref, encounter_ref, authoredOn, basedOn[], partOf[], reasonRef[], supportingInfo[]
+
+(SELECT
+  user.id AS userId,
+  fhir.id AS record_source_id,
+  bo.reference,
+  bo.display,
+  bo.type,
+  fhir.authoredOn,
+  "basedOn" as source_field
+FROM `healthtree-production.HT_test_sync.apps-curehub-medicalResources-r4-MedicationRequest`
+CROSS JOIN UNNEST(IFNULL(fhir.basedOn, [])) AS bo
+WHERE bo.reference IS NOT NULL AND bo.reference != '')
+
+UNION ALL
+
+(SELECT
+user.id as userId,
+fhir.id as record_source_id,
+fhir.encounter.reference as reference,
+fhir.encounter.display as display,
+"Encounter" as type,
+fhir.authoredOn,
+"encounter" as source_field
+FROM `healthtree-production.HT_test_sync.apps-curehub-medicalResources-r4-MedicationRequest`
+WHERE fhir.encounter IS NOT NULL)
+
+UNION ALL
+
+(SELECT
+user.id as userId,
+fhir.id as record_source_id,
+SPLIT(fhir.priorPrescription.reference, "/")[1] as reference,
+fhir.priorPrescription.display as display,
+"MedicationRequest" as type,
+fhir.authoredOn,
+"priorPrescription" as field_source
+FROM `healthtree-production.HT_test_sync.apps-curehub-medicalResources-r4-MedicationRequest`
+WHERE fhir.priorPrescription IS NOT NULL)

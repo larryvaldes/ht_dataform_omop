@@ -1,0 +1,38 @@
+config {
+    type: "view"
+}
+
+Select
+pv.person_source_value as person_source_value,
+pv.record_source_id as record_source_id,
+ ROW_NUMBER() OVER (ORDER BY (Select null)) as procedure_occurrence_id,
+ p.person_id as person_id,
+COALESCE(concept.concept_id, 0) as procedure_concept_id,
+ pv.procedure_DATE as procedure_DATE,
+ CAST(pv.procedure_DATE AS DATETIME) as procedure_DATETIME,
+ pv.procedure_source_type_code as procedure_type_concept_id,
+ null as modifier_concept_id,
+ null as quantity,
+ null as provider_id,
+ vo.visit_occurrence_id as visit_occurrence_id,
+
+pv.visit_occurrence_reference as visit_occurrence_reference,
+
+ null as visit_detail_id,
+ pv.procedure_source_value as procedure_source_value,
+ pv.procedure_source_system,
+ pv.procedure_source_concept_id as procedure_source_concept_id,
+ null as modifier_source_value,
+
+ pv.procedure_source_type as procedure_source_type,
+ pv.procedure_source_status as procedure_source_status
+
+FROM
+
+ ${ref("procedure_unnest")} pv join ${ref("person")} p on pv.person_source_value = p.person_source_value
+ LEFT JOIN ${ref("visit_occurrence")} vo on pv.visit_occurrence_reference = vo.record_source_id
+ LEFT JOIN ${ref("vocabulary_mapping")} vm ON
+ LOWER(pv.procedure_source_system) LIKE "%" || vm.search_record ||"%"
+ LEFT JOIN `healthtree-production.OMOP.Concept` concept ON
+concept.concept_code = pv.procedure_source_concept_id
+AND LOWER(vm.vocabulary_name) LIKE '%' || LOWER(concept.vocabulary_id) || '%'

@@ -3,18 +3,14 @@ config {
 }
 
 with base as(
-select * from `healthtree-production.HT.Procedure` where fhir is not null and user.name in
+select * from `healthtree-production.HT_test_sync.apps-curehub-medicalResources-r4-Procedure` where fhir is not null and user in
 (Select person_source_value from ${ref("allPersons")})
 )
 
 SELECT 
-user.name as person_source_value,
+user as person_source_value,
 fhir.id as record_source_id,
-COALESCE(
-fhir.performedDateTime.string,
-STRING(fhir.performedDateTime.date_time),
-fhir.performedPeriod.start
-) as procedure_DATE,
+DATE(fhir.performedDateTime) as procedure_DATE,
 CASE WHEN STARTS_WITH(fhir.encounter.reference, "Encounter/") THEN 
   SPLIT(fhir.encounter.reference, "Encounter/")[OFFSET(1)]
 ELSE 
@@ -28,8 +24,7 @@ COALESCE(
 COALESCE(fhir.code.text, (SELECT coding.display from UNNEST(fhir.code.coding) as coding where LOWER(coding.system) like "%snomed%" or
 LOWER(coding.system) like "%loinc%" or LOWER(coding.system) like "%icd-9%" or LOWER(coding.system) like "%icd-10%" limit 1)) as procedure_source_value,
 (SELECT 
-CASE WHEN coding.code.provided like "string" THEN coding.code.string
-WHEN coding.code.provided like "integer" THEN FORMAT("%d", coding.code.integer) END as code
+coding.code as code
  from UNNEST(fhir.code.coding) as coding where LOWER(coding.system) like "%snomed%" or
 LOWER(coding.system) like "%loinc%" or LOWER(coding.system) like "%icd-9%" or LOWER(coding.system) like "%icd-10%" limit 1) as procedure_source_concept_id
 

@@ -1,0 +1,20 @@
+config {
+    type: "view"
+}
+WITH
+  base AS (
+  SELECT
+    *
+  FROM
+    `healthtree-production.HT.MedicationRequest`
+  WHERE
+    fhir IS NOT NULL
+    AND user.name IN (
+    SELECT
+      person_source_value
+    FROM
+      ${ref("allPersons")}) )
+
+medRef as (
+    
+)

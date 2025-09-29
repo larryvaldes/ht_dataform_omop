@@ -1,5 +1,5 @@
 config {
-    type: "view"
+    type: "table"
 }
 
-select person_source_value from ${ref("person")} 
+select distinct person_source_value from ${ref("person")} 

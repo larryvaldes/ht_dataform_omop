@@ -1,44 +1,27 @@
 config {
-    type: "table"
+  type: "table"
 }
 
-select 
-ROW_NUMBER() OVER (ORDER BY (Select null)) as drug_exposure_id,
-p.person_id as person_id,
-p.person_source_value as person_source_value,
-dv.record_source_id as record_source_id,
-COALESCE(concept.concept_id, 0) as drug_concept_id,
-dv.drug_exposure_start_DATE as drug_exposure_start_DATE,
-null as drug_exposure_start_DATETIME,
-dv.drug_exposure_end_DATE as drug_exposure_end_DATE,
-null as drug_exposure_end_DATETIME,
-null as verbatim_end_DATE,
-null as drug_type_concept_id,
-null as stop_reason,
-null as refills,
-dv.quantity as quantity,
-dv.days_supply as days_supply,
-null as sig,
-null as route_concept_id,
-null as lot_number,
-null as provider_id,
-null as visit_occurrence_id,
-null as visit_detail_id,
-dv.drug_source_value as drug_source_value,
-null as drug_source_concept_id,
-dv.route_source_value as route_source_value,
-dv.dose_unit_source_value as dose_unit_source_value,
+-- 1) Tabla base
+WITH base AS (
+  SELECT *
+  FROM ${ref("drug_exposure_semi")}   -- ⇐ ajusta si no usas ref()
+),
 
-dv.visit_occurrence_reference as visit_occurrence_reference,
-dv.visit_occurrence_type as visit_occurrence_type,
-dv.drug_source_code as drug_source_code,
-dv.drug_source_system as drug_source_system,
-dv.drug_source_status as drug_source_status,
-dv.drug_source_category as drug_source_category
+-- 2) Marca por par (persona, registro fuente) si existe algún mapeo ≠ 0
+flagged AS (
+  SELECT
+    b.*,
+    MAX( IF(COALESCE(b.drug_concept_id, 0) != 0, 1, 0) )
+      OVER (PARTITION BY b.person_source_value, b.record_source_id) AS has_mapped_in_pair
+  FROM base b
+)
 
-from ${ref("drug_exposure_valid")} dv join ${ref("person")} p on dv.person_source_value = p.person_source_value
-LEFT JOIN ${ref("vocabulary_mapping")} vm ON
-LOWER(dv.drug_source_system) LIKE "%" || LOWER(vm.search_record) || "%"
-LEFT JOIN `healthtree-production.OMOP.Concept` concept ON
-concept.concept_code = dv.drug_source_code
-AND  LOWER(concept.vocabulary_id) LIKE '%' || LOWER(vm.vocabulary_name) || '%'
+-- 3) Regla de filtrado:
+--    - Si en el par hay algún mapeo ≠ 0 (has_mapped_in_pair = 1), solo mostramos las filas ≠ 0.
+--    - Si en el par NO hay mapeos ≠ 0 (has_mapped_in_pair = 0), mostramos todo (incluidos 0).
+SELECT
+  * EXCEPT(has_mapped_in_pair)
+FROM flagged
+WHERE has_mapped_in_pair = 0
+   OR COALESCE(drug_concept_id, 0) != 0

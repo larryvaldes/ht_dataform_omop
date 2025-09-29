@@ -1,0 +1,64 @@
+config { type: "view" }
+
+-- wrk.fhir_edges (1-hop)
+WITH mr AS (
+  SELECT 'MedicationRequest' AS src_type, id AS src_id,
+    ARRAY_CONCAT(
+      ARRAY(SELECT AS STRUCT 'Encounter' AS dst_type, SPLIT(encounter_ref,'/')[OFFSET(1)] AS dst_id) ,
+      ARRAY(SELECT AS STRUCT 'CarePlan',    SPLIT(ref,'/')[OFFSET(1)] FROM UNNEST(basedOn)        AS ref),
+      ARRAY(SELECT AS STRUCT 'MedicationRequest', SPLIT(ref,'/')[OFFSET(1)] FROM UNNEST(partOf)   AS ref),
+      ARRAY(SELECT AS STRUCT 'Condition',   SPLIT(ref,'/')[OFFSET(1)] FROM UNNEST(reasonRef)      AS ref),
+      ARRAY(SELECT AS STRUCT REGEXP_EXTRACT(ref, r'^([A-Za-z]+)') AS dst_type,
+                         SPLIT(ref,'/')[OFFSET(1)] AS dst_id
+            FROM UNNEST(supportingInfo) AS ref)
+    ) AS edges
+  FROM `HT_test_sync.MedicationRequest_idx`
+),
+pr AS (
+  SELECT 'Procedure' AS src_type, id AS src_id,
+    ARRAY_CONCAT(
+      ARRAY(SELECT AS STRUCT 'Encounter', SPLIT(encounter_ref,'/')[OFFSET(1)]),
+      ARRAY(SELECT AS STRUCT REGEXP_EXTRACT(ref, r'^([A-Za-z]+)'),
+                         SPLIT(ref,'/')[OFFSET(1)]  FROM UNNEST(basedOn)),
+      ARRAY(SELECT AS STRUCT REGEXP_EXTRACT(ref, r'^([A-Za-z]+)'),
+                         SPLIT(ref,'/')[OFFSET(1)]  FROM UNNEST(partOf)),
+      ARRAY(SELECT AS STRUCT REGEXP_EXTRACT(ref, r'^([A-Za-z]+)'),
+                         SPLIT(ref,'/')[OFFSET(1)]  FROM UNNEST(reasonRef)),
+      ARRAY(SELECT AS STRUCT REGEXP_EXTRACT(ref, r'^([A-Za-z]+)'),
+                         SPLIT(ref,'/')[OFFSET(1)]  FROM UNNEST(report))
+    ) AS edges
+  FROM `fhir.Procedure_idx`
+),
+ob AS (
+  SELECT 'Observation' AS src_type, id AS src_id,
+    ARRAY_CONCAT(
+      ARRAY(SELECT AS STRUCT 'Encounter', SPLIT(encounter_ref,'/')[OFFSET(1)]),
+      ARRAY(SELECT AS STRUCT REGEXP_EXTRACT(ref, r'^([A-Za-z]+)'),
+                         SPLIT(ref,'/')[OFFSET(1)] FROM UNNEST(partOf))
+    ) AS edges
+  FROM `fhir.Observation_idx`
+),
+dr AS (
+  SELECT 'DiagnosticReport' AS src_type, id AS src_id,
+    ARRAY_CONCAT(
+      ARRAY(SELECT AS STRUCT 'Encounter', SPLIT(encounter_ref,'/')[OFFSET(1)]),
+      ARRAY(SELECT AS STRUCT 'Observation', SPLIT(res.id,'/')[OFFSET(1)] FROM UNNEST(result) AS res)
+    ) AS edges
+  FROM `fhir.DiagnosticReport_idx`
+),
+cp AS (
+  SELECT 'CarePlan' AS src_type, id AS src_id,
+    ARRAY(SELECT AS STRUCT REGEXP_EXTRACT(ref, r'^([A-Za-z]+)'),
+                       SPLIT(ref,'/')[OFFSET(1)] FROM UNNEST(activityRef)) AS edges
+  FROM `fhir.CarePlan_idx`
+)
+SELECT src_type, src_id, e.dst_type, e.dst_id
+FROM mr, UNNEST(edges) e
+UNION ALL
+SELECT src_type, src_id, e.dst_type, e.dst_id FROM pr, UNNEST(edges) e
+UNION ALL
+SELECT src_type, src_id, e.dst_type, e.dst_id FROM ob, UNNEST(edges) e
+UNION ALL
+SELECT src_type, src_id, e.dst_type, e.dst_id FROM dr, UNNEST(edges) e
+UNION ALL
+SELECT src_type, src_id, e.dst_type, e.dst_id FROM cp, UNNEST(edges) e

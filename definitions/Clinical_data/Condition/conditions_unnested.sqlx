@@ -5,15 +5,14 @@ config {
 WITH exploded_data AS (
   -- Step 1: Unnest the fhir.code.coding array while keeping the original index and record id
   SELECT
-  user.name as person_source_value,
+  user as person_source_value,
     fhir.id as fhir_id, -- Replace with your unique record identifier
     OFFSET AS array_index,
     coding.system,
     coding.code,
     COALESCE(fhir.code.text, coding.display) as display,
     SPLIT(fhir.encounter.reference, '/')[OFFSET(1)] AS encounter,
-    COALESCE(fhir.clinicalStatus.string, fhir.clinicalStatus.entity.text, fhir.clinicalStatus.entity.coding[SAFE_OFFSET(0)].display,
-    fhir.clinicalStatus.entity.coding[SAFE_OFFSET(0)].code) as status,
+    COALESCE(fhir.clinicalStatus.text, fhir.clinicalStatus.coding[SAFE_OFFSET(0)].display) as status,
     ARRAY_TO_STRING(ARRAY(SELECT cat.text FROM UNNEST(fhir.category) AS cat), '/') AS category
   FROM 
     ${ref("condition_valid")}, -- Replace with your table details

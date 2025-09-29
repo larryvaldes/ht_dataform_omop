@@ -3,13 +3,13 @@ config {
 }
 
 with base as(
-select * from `healthtree-production.HT.Encounter` where fhir is not null and user.name in
+select * from `healthtree-production.HT_test_sync.apps-curehub-medicalResources-r4-Encounter` where fhir is not null and user.id in
 (Select person_source_value from ${ref("allPersons")})
 )
 
 SELECT
 null as visit_occurrence_id,
-user.name as person_source_value,
+user.id as person_source_value,
 fhir.id as record_source_id,
   null as visit_concept_id,
   fhir.period.start as visit_start_DATE,

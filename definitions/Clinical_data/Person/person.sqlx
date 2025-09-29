@@ -17,9 +17,11 @@ COALESCE(
 EXTRACT(YEAR FROM CAST(p.fhir.birthDate AS DATE)) as year_of_birth,
 EXTRACT(MONTH FROM CAST(p.fhir.birthDate AS DATE)) as month_of_birth,
 EXTRACT(DAY FROM CAST(p.fhir.birthDate AS DATE)) as day_of_birth,
-null as birth_DATETIME,
-null as race_concept_id,
-null as ethnicity_concept_id,
+DATETIME(EXTRACT(YEAR FROM CAST(p.fhir.birthDate AS DATE)),
+EXTRACT(MONTH FROM CAST(p.fhir.birthDate AS DATE)),
+EXTRACT(DAY FROM CAST(p.fhir.birthDate AS DATE)), 0,0,0) as birth_DATETIME,
+pr.race_source_concept_id as race_concept_id,
+pe.ethnicity_source_concept_id as ethnicity_concept_id,
 null as location_id,
 null as provider_id,
 null as care_site_id,
@@ -31,16 +33,23 @@ COALESCE(
     ELSE null END,
     pg.gender_source_value
 ) as gender_source_value,
-null as gender_source_concept_id,
+COALESCE(
+    CASE WHEN p.fhir.gender is not null and LOWER(p.fhir.gender) not like "%other%" and LOWER(p.fhir.gender) not like "%unknown%" then 
+    CASE WHEN LOWER(p.fhir.gender) like "male" or LOWER(p.fhir.gender) like "m" then 8507
+         WHEN LOWER(p.fhir.gender) like "female" or LOWER(p.fhir.gender) like "f" then 8532 END
+    ELSE null END,
+    CASE WHEN pg.gender_source_value like "male" then 8507
+        WHEN pg.gender_source_value like "female" then 8532 END
+) as gender_source_concept_id,
 pr.race_source_value as race_source_value,
 pr.race_source_concept_id as race_source_concept_id,
 pe.ethnicity_source_value as ethnicity_source_value,
 pe.ethnicity_source_concept_id as ethnicity_source_concept_id
 
 from (${ref("universe-person")} u join 
-(select * from `healthtree-production.HT.Patient` where fhir is not null) p
-on u.patient_id = p.user.name) left join ${ref("person_gender")} pg on u.patient_id = pg.patient_id left join ${ref("person_race")} pr
-on u.patient_id = pr.patient_id left join ${ref("person_ethnicity")} pe on u.patient_id = pe.patient_id
+(select * from `healthtree-production.HT_test_sync.apps-curehub-medicalResources-r4-Patient` where fhir is not null) p
+on u.patient_id = p.user.id) left join ${ref("person_gender")} pg on u.patient_id = pg.patient_id.id left join ${ref("person_race")} pr
+on u.patient_id = pr.patient_id.id left join ${ref("person_ethnicity")} pe on u.patient_id = pe.patient_id.id
 )
 
 

@@ -1,0 +1,103 @@
+config {
+  type: "view"
+}
+
+-- Ajusta el proyecto/dataset/tabla a los tuyos:
+WITH lot AS (
+  SELECT
+    `__key__`.name              AS lineId,
+    user.name                   AS userId,
+    disease.kind                AS diseaseKind,
+    disease.name                AS diseaseName,
+    startDate,
+    endDate,
+    bestOutcome,
+    lastOutcome,
+    consolidation,
+    induction,
+    intermediate,
+    maintenance
+  FROM `healthtree-production.HT.linesOfTherapy`
+)
+
+-- CONSOLIDATION - mappings
+SELECT
+  lineId, userId, diseaseKind, diseaseName, startDate, endDate, bestOutcome, lastOutcome,
+  'consolidation' AS section,
+  'mappings'      AS list_type,
+  m.kind          AS item_kind,
+  m.name          AS item_name
+FROM lot
+CROSS JOIN UNNEST(consolidation.mappings) AS m
+
+UNION ALL
+
+-- CONSOLIDATION - normalizations
+SELECT
+  lineId, userId, diseaseKind, diseaseName, startDate, endDate, bestOutcome, lastOutcome,
+  'consolidation', 'normalizations',
+  n.kind, n.name
+FROM lot
+CROSS JOIN UNNEST(consolidation.normalizations) AS n
+
+UNION ALL
+
+-- INDUCTION - mappings
+SELECT
+  lineId, userId, diseaseKind, diseaseName, startDate, endDate, bestOutcome, lastOutcome,
+  'induction', 'mappings',
+  m.kind, m.name
+FROM lot
+CROSS JOIN UNNEST(induction.mappings) AS m
+
+UNION ALL
+
+-- INDUCTION - normalizations
+SELECT
+  lineId, userId, diseaseKind, diseaseName, startDate, endDate, bestOutcome, lastOutcome,
+  'induction', 'normalizations',
+  n.kind, n.name
+FROM lot
+CROSS JOIN UNNEST(induction.normalizations) AS n
+
+UNION ALL
+
+-- INTERMEDIATE - mappings
+SELECT
+  lineId, userId, diseaseKind, diseaseName, startDate, endDate, bestOutcome, lastOutcome,
+  'intermediate', 'mappings',
+  m.kind, m.name
+FROM lot
+CROSS JOIN UNNEST(intermediate.mappings) AS m
+
+UNION ALL
+
+-- INTERMEDIATE - normalizations
+SELECT
+  lineId, userId, diseaseKind, diseaseName, startDate, endDate, bestOutcome, lastOutcome,
+  'intermediate', 'normalizations',
+  n.kind, n.name
+FROM lot
+CROSS JOIN UNNEST(intermediate.normalizations) AS n
+
+UNION ALL
+
+-- MAINTENANCE - mappings
+SELECT
+  lineId, userId, diseaseKind, diseaseName, startDate, endDate, bestOutcome, lastOutcome,
+  'maintenance', 'mappings',
+  m.kind, m.name
+FROM lot
+CROSS JOIN UNNEST(maintenance.mappings) AS m
+
+UNION ALL
+
+-- MAINTENANCE - normalizations
+SELECT
+  lineId, userId, diseaseKind, diseaseName, startDate, endDate, bestOutcome, lastOutcome,
+  'maintenance', 'normalizations',
+  n.kind, n.name
+FROM lot
+CROSS JOIN UNNEST(maintenance.normalizations) AS n
+
+ORDER BY lineId

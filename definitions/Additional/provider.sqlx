@@ -1,0 +1,23 @@
+config {
+  type: "table"
+}
+
+SELECT *
+FROM UNNEST([
+  STRUCT(
+    CAST(NULL AS INT64)  AS provider_id,
+    CAST(NULL AS STRING) AS provider_name,
+    CAST(NULL AS INT64)  AS npi,
+    CAST(NULL AS INT64)  AS dea,
+    CAST(NULL AS INT64)  AS specialty_concept_id,
+    CAST(NULL AS INT64)  AS care_site_id,
+    CAST(NULL AS INT64)  AS year_of_birth,
+    CAST(NULL AS STRING) AS gender_source_value,
+    CAST(NULL AS INT64)  AS gender_concept_id,
+    CAST(NULL AS INT64)  AS gender_source_concept_id,
+    CAST(NULL AS STRING) AS specialty_source_value,
+    CAST(NULL AS INT64)  AS specialty_source_concept_id,
+    CAST(NULL AS STRING) AS provider_source_value
+  )
+])
+WHERE FALSE

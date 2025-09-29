@@ -1,0 +1,93 @@
+/*
+config {
+  type: "table"
+}
+
+SELECT *
+FROM UNNEST([
+  STRUCT(
+    CAST(NULL AS INT64) AS condition_era_id,
+    CAST(NULL AS INT64) AS person_id,
+    CAST(NULL AS INT64) AS condition_concept_id,
+    CAST(NULL AS DATE) AS condition_era_start_date,
+    CAST(NULL AS DATE) AS condition_era_end_date,
+    CAST(NULL AS INT64) AS condition_occurrence_count
+  )
+])
+WHERE FALSE
+*/
+
+config {
+  type: "table"
+}
+
+-- 1) Toma solo fechas (ignora *_datetime)
+WITH base AS (
+  SELECT
+    person_id,
+    condition_concept_id,
+    SAFE_CAST(condition_start_date AS DATE) AS start_date,
+    -- si no hay end_date, usa el start_date
+    COALESCE(SAFE_CAST(condition_end_date AS DATE),
+             SAFE_CAST(condition_start_date AS DATE)) AS end_date
+  FROM ${ref("condition_occurrence")}
+  WHERE person_id IS NOT NULL
+    AND condition_concept_id IS NOT NULL
+    AND condition_concept_id != 0
+),
+
+-- 2) Normaliza: evita fin < inicio
+norm AS (
+  SELECT
+    person_id,
+    condition_concept_id,
+    start_date,
+    CASE
+      WHEN end_date IS NULL OR end_date < start_date THEN start_date
+      ELSE end_date
+    END AS end_date
+  FROM base
+),
+
+-- 3) Agrega por persona + condición (una sola era)
+agg AS (
+  SELECT
+    person_id,
+    condition_concept_id,
+    MIN(start_date) AS condition_era_start_date,
+    MAX(end_date)   AS condition_era_end_date,
+    COUNT(*)        AS condition_occurrence_count
+  FROM norm
+  WHERE start_date IS NOT NULL
+  GROUP BY person_id, condition_concept_id
+)
+
+-- 4) Salida con ID estable
+SELECT
+  CASE
+    WHEN FARM_FINGERPRINT(
+           CONCAT(
+             CAST(person_id AS STRING), '|',
+             CAST(condition_concept_id AS STRING), '|',
+             FORMAT_DATE('%F', condition_era_start_date)
+           )
+         ) = -9223372036854775808
+      THEN 9223372036854775807
+    ELSE ABS(
+      FARM_FINGERPRINT(
+        CONCAT(
+          CAST(person_id AS STRING), '|',
+          CAST(condition_concept_id AS STRING), '|',
+          FORMAT_DATE('%F', condition_era_start_date)
+        )
+      )
+    )
+  END AS condition_era_id,
+  person_id,
+  condition_concept_id,
+  condition_era_start_date,
+  condition_era_end_date,
+  condition_occurrence_count
+FROM agg
+WHERE condition_era_start_date IS NOT NULL
+  AND condition_era_end_date   IS NOT NULL

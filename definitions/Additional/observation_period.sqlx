@@ -1,0 +1,59 @@
+/*
+config {
+  type: "table"
+}
+
+SELECT *
+FROM UNNEST([
+  STRUCT(
+    CAST(NULL AS INT64) AS observation_period_id,
+    CAST(NULL AS INT64) AS person_id,
+    CAST(NULL AS DATE) AS observation_period_start_date,
+    CAST(NULL AS DATE) AS observation_period_end_date,
+    CAST(NULL AS INT64) AS period_type_concept_id
+  )
+])
+WHERE FALSE
+*/
+
+config {
+  type: "table"
+}
+
+WITH base AS (
+  SELECT
+    person_id,
+    -- Asegura DATE (si ya es DATE, no pasa nada)
+    SAFE_CAST(observation_date AS DATE) AS obs_date
+  FROM ${ref("observation")}
+  WHERE person_id IS NOT NULL
+),
+agg AS (
+  SELECT
+    person_id,
+    MIN(obs_date) AS observation_period_start_date,
+    MAX(obs_date) AS observation_period_end_date
+  FROM base
+  WHERE obs_date IS NOT NULL
+  GROUP BY person_id
+)
+SELECT
+  -- ID estable y no nulo
+  CASE
+    WHEN FARM_FINGERPRINT(
+           CONCAT(CAST(person_id AS STRING), '|', FORMAT_DATE('%F', observation_period_start_date))
+         ) = -9223372036854775808
+      THEN 9223372036854775807
+    ELSE ABS(
+      FARM_FINGERPRINT(
+        CONCAT(CAST(person_id AS STRING), '|', FORMAT_DATE('%F', observation_period_start_date))
+      )
+    )
+  END AS observation_period_id,
+  person_id,
+  observation_period_start_date,
+  observation_period_end_date,
+  44814724 AS period_type_concept_id  -- Observation period (derived)
+FROM agg
+WHERE observation_period_start_date IS NOT NULL
+  AND observation_period_end_date   IS NOT NULL
