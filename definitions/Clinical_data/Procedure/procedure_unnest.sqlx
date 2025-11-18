@@ -10,7 +10,8 @@ select * from `healthtree-production.HT_test_sync.apps-curehub-medicalResources-
 intermediate as (
 SELECT 
 user.id as person_source_value,
-fhir.id as record_source_id,
+id as record_source_id,
+fhir.id as fhir_record_id,
 
 SAFE.PARSE_DATE(
     '%Y-%m-%d',

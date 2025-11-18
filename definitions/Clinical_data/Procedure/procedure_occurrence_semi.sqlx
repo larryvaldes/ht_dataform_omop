@@ -5,6 +5,7 @@ config {
 Select
 pv.person_source_value as person_source_value,
 pv.record_source_id as record_source_id,
+pv.fhir_record_id,
  ROW_NUMBER() OVER (ORDER BY (Select null)) as procedure_occurrence_id,
  p.person_id as person_id,
 COALESCE(concept.concept_id, 0) as procedure_concept_id,
@@ -21,7 +22,8 @@ pv.visit_occurrence_reference as visit_occurrence_reference,
  null as visit_detail_id,
  pv.procedure_source_value as procedure_source_value,
  pv.procedure_source_system,
- pv.procedure_source_concept_id as procedure_source_concept_id,
+ COALESCE(concept.concept_id, 0) as procedure_source_concept_id,
+ pv.procedure_source_concept_id as procedure_source_code,
  null as modifier_source_value,
 
  pv.procedure_source_type as procedure_source_type,

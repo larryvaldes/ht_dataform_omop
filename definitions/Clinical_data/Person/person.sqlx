@@ -46,7 +46,7 @@ pr.race_source_concept_id as race_source_concept_id,
 pe.ethnicity_source_value as ethnicity_source_value,
 pe.ethnicity_source_concept_id as ethnicity_source_concept_id
 
-from (${ref("universe-person")} u join 
+from (${ref("universe")} u join 
 (select * from `healthtree-production.HT_test_sync.apps-curehub-medicalResources-r4-Patient` where fhir is not null) p
 on u.patient_id = p.user.id) left join ${ref("person_gender")} pg on u.patient_id = pg.patient_id.id left join ${ref("person_race")} pr
 on u.patient_id = pr.patient_id.id left join ${ref("person_ethnicity")} pe on u.patient_id = pe.patient_id.id

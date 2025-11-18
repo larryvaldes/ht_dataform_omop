@@ -167,48 +167,49 @@ drug_resolution as (
 
 /* ---------- Salida (vista staging con mapeo OMOP listo) ---------- */
 select
-  -- Identificadores fuente
-  userId.id                                as person_source_value,
-  recordId                              as record_source_id,
+  -- Identificadores
+  userId.id                           as person_source_value,
+  keyId                               as record_source_id,   -- MR.id (externo)
+  recordId                            as fhir_record_id,     -- MR.fhir.id
 
   -- Fechas de exposición
-  cast(start_dt as date)                as drug_exposure_start_date,
-  start_dt                              as drug_exposure_start_datetime,
-  cast(end_dt as date)                  as drug_exposure_end_date,
-  end_dt                                as drug_exposure_end_datetime,
+  cast(start_dt as date)              as drug_exposure_start_date,
+  start_dt                            as drug_exposure_start_datetime,
+  cast(end_dt as date)                as drug_exposure_end_date,
+  end_dt                              as drug_exposure_end_datetime,
 
   -- Otros campos útiles
-  medSystem                             as drug_source_system,
-  null                                  as verbatim_end_date,
-  null                                  as drug_type_concept_id,
-  null                                  as stop_reason,
-  null                                  as refills,
+  medSystem                           as drug_source_system,
+  null                                as verbatim_end_date,
+  null                                as drug_type_concept_id,
+  null                                as stop_reason,
+  null                                as refills,
 
-  doseValue                             as quantity,
+  doseValue                           as quantity,
   case when periodUnit = 'd' then period else null end as days_supply,
 
-  instructions                          as sig,
-  route                                 as route_source_value,
-  null                                  as route_concept_id,
-  null                                  as lot_number,
-  null                                  as provider_id,
-  null                                  as visit_occurrence_id,
-  null                                  as visit_detail_id,
+  instructions                        as sig,
+  route                               as route_source_value,
+  null                                as route_concept_id,
+  null                                as lot_number,
+  null                                as provider_id,
+  null                                as visit_occurrence_id,
+  null                                as visit_detail_id,
 
-  coalesce(medReferenceName, text)      as drug_source_value,
+  coalesce(medReferenceName, text)    as drug_source_value,
 
   -- Mapeo a OMOP
   drug_concept_id,
   drug_source_concept_id,
 
   -- Código fuente (por rastreabilidad)
-  cast(medCode as string)               as drug_source_code,
+  cast(medCode as string)             as drug_source_code,
 
   -- Otros metadatos
-  doseUnit                              as dose_unit_source_value,
-  visit_reference                       as visit_occurrence_reference,
-  category                              as visit_occurrence_type,
-  category                              as drug_source_category,
-  status                                as drug_source_status
+  doseUnit                            as dose_unit_source_value,
+  visit_reference                     as visit_occurrence_reference,
+  category                            as visit_occurrence_type,
+  category                            as drug_source_category,
+  status                              as drug_source_status
 
 from drug_resolution

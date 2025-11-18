@@ -2,27 +2,54 @@ config {
     type: "view"
 }
 
+WITH base AS(
 select
 ROW_NUMBER() OVER (ORDER BY (Select null)) as observation_id,
 p.person_source_value as person_source_value,
-ov.record_source_id as record_source_id,
+SAFE_CAST(ov.record_source_id AS STRING) as record_source_id,
 p.person_id as person_id,
 COALESCE(concept.concept_id, 0) as observation_concept_id,
-ov.observation_DATE as observation_DATE,
-null as observation_DATETIME,
+
+COALESCE(
+  -- 1) Direct ISO 8601 / RFC3339 style with Z or offset
+  SAFE_CAST(ov.observation_DATE AS TIMESTAMP),
+
+  -- 2) JS Date-style string:
+  --    "Tue Jan 11 2022 00:00:00 GMT-0700 (Mountain Standard Time)"
+  SAFE.PARSE_TIMESTAMP(
+    '%a %b %d %Y %H:%M:%S GMT%z',
+    REGEXP_EXTRACT(
+      ov.observation_DATE,
+      r'^[A-Za-z]{3} [A-Za-z]{3} \d{1,2} \d{4} \d{2}:\d{2}:\d{2} GMT[+-]\d{4}'
+    )
+  ),
+
+  -- 3) Year-month only: "2023-06" → "2023-06-01 00:00:00"
+  CASE
+    WHEN REGEXP_CONTAINS(ov.observation_DATE, r'^\d{4}-\d{2}$') THEN
+      SAFE_CAST(CONCAT(ov.observation_DATE, '-01 00:00:00') AS TIMESTAMP)
+  END,
+
+  -- 4) Year only: "2023" → "2023-01-01 00:00:00"
+  CASE
+    WHEN REGEXP_CONTAINS(ov.observation_DATE, r'^\d{4}$') THEN
+      SAFE_CAST(CONCAT(ov.observation_DATE, '-01-01 00:00:00') AS TIMESTAMP)
+  END
+) AS observation_ts,
+
 null as observation_type_concept_id,
 ov.value_as_number as value_as_number,
 ov.value_as_string as value_as_string,
-ov.value_as_concept_id as value_as_concept_id,
+SAFE_CAST(ov.value_as_concept_id AS INT64) as value_as_concept_id,
 null as qualifier_concept_id,
 null as unit_concept_id,
 null as provider_id,
 null as visit_occurrence_id,
 null as visit_detail_id,
 ov.observation_source_value as observation_source_value,
-null as oservation_source_concept_id,
+null as observation_source_concept_id,
 ov.unit_source_value as unit_source_value,
-null as qualifier_source_value,
+SAFE_CAST(null AS STRING) as qualifier_source_value,
 
 ov.visit_occurrence_reference as visit_occurrence_reference,
 ov.visit_occurrence_type as visit_occurrence_type,
@@ -38,3 +65,8 @@ LEFT JOIN `healthtree-production.OMOP.Concept` concept ON
 concept.concept_code = ov.observation_source_code
 AND LOWER(ov.observation_source_system) LIKE '%' || LOWER(concept.vocabulary_id) || '%'
 AND concept.concept_id <> 0
+)
+
+SELECT SAFE_CAST(observation_ts AS DATE) observation_DATE,
+SAFE_CAST(observation_ts AS DATETIME) observation_DATETIME,
+base.* EXCEPT(observation_ts) FROM base

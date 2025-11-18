@@ -2,26 +2,90 @@ config {
   type: "table"
 }
 
--- 1) Tabla base
+-- 1) Universo base: measurement_semi (mapeo estándar)
 WITH base AS (
-  SELECT *
-  FROM ${ref("measurement_semi")}   -- ⇐ ajusta si no usas ref()
-),
-
--- 2) Marca por par (persona, registro fuente) si existe algún mapeo ≠ 0
-flagged AS (
   SELECT
     b.*,
-    MAX( IF(COALESCE(b.measurement_concept_id, 0) != 0, 1, 0) )
-      OVER (PARTITION BY b.person_source_value, b.record_source_id) AS has_mapped_in_pair
-  FROM base b
+    1 AS mapping_layer   -- 1 = mapeo estándar
+  FROM ${ref("measurement_semi")} b
+),
+
+-- 2) Universo prioritario: meas_adjusted (mapeos mejorados / heurísticos)
+priority AS (
+  SELECT
+    p.*,
+    2 AS mapping_layer   -- 2 = mapeo prioritario
+  FROM ${ref("meas_adjusted")} p
+),
+
+-- 3) Combinamos todo el universo
+combined AS (
+  SELECT measurement_id, measurement_DATE, measurement_DATETIME, person_source_value,
+  record_source_id, person_id, measurement_time, measurement_type_concept_id, operator_concept_id,
+  value_as_number, value_as_concept_id, unit_concept_id, range_low, range_high, provider_id,
+  visit_occurrence_id, visit_detail_id, measurement_source_value, measurement_source_concept_id,
+  unit_source_value, value_source_value, measurement_source_code, measurement_source_system,
+  measurement_source_status, measurement_source_type, visit_occurrence_reference,
+  visit_occurrence_type, measurement_concept_id, mapping_layer
+  FROM base
+  UNION ALL
+  SELECT measurement_id, measurement_DATE, measurement_DATETIME, person_source_value,
+  record_source_id, person_id, measurement_time, measurement_type_concept_id, operator_concept_id,
+  value_as_number, value_as_concept_id, unit_concept_id, range_low, range_high, provider_id,
+  visit_occurrence_id, visit_detail_id, measurement_source_value, measurement_source_concept_id,
+  unit_source_value, value_source_value, measurement_source_code, measurement_source_system,
+  measurement_source_status, measurement_source_type, visit_occurrence_reference,
+  visit_occurrence_type, measurement_concept_id, mapping_layer
+  FROM priority
+),
+
+-- 4) Calculamos flags por par (persona, registro fuente)
+flagged AS (
+  SELECT
+    c.*,
+
+    -- ¿Hay algún mapeo ≠ 0 en cualquier capa para este par?
+    MAX(
+      IF(COALESCE(c.measurement_concept_id, 0) != 0, 1, 0)
+    ) OVER (
+      PARTITION BY c.person_source_value, c.record_source_id
+    ) AS has_any_map,
+
+    -- ¿Hay algún mapeo ≠ 0 en capa 2 (tablas prioritarias) para este par?
+    MAX(
+      IF(
+        COALESCE(c.measurement_concept_id, 0) != 0
+        AND c.mapping_layer = 2,
+        1,
+        0
+      )
+    ) OVER (
+      PARTITION BY c.person_source_value, c.record_source_id
+    ) AS has_priority_map
+  FROM combined c
 )
 
--- 3) Regla de filtrado:
---    - Si en el par hay algún mapeo ≠ 0 (has_mapped_in_pair = 1), solo mostramos las filas ≠ 0.
---    - Si en el par NO hay mapeos ≠ 0 (has_mapped_in_pair = 0), mostramos todo (incluidos 0).
+-- 5) Regla final:
+--    a) Si hay mapeo prioritario → solo filas mapeadas de capa 2.
+--    b) Si no hay prioritario pero sí mapeo estándar → filas mapeadas estándar.
+--    c) Si no hay ningún mapeo → todas las filas (incluyendo concept_id = 0).
 SELECT
-  * EXCEPT(has_mapped_in_pair)
+  * EXCEPT(has_any_map, has_priority_map, mapping_layer)
 FROM flagged
-WHERE has_mapped_in_pair = 0
-   OR COALESCE(measurement_concept_id, 0) != 0
+WHERE
+  (
+    -- a) Hay mapeo prioritario: quedarnos solo con las filas mapeadas de capa 2
+    has_priority_map = 1
+    AND mapping_layer = 2
+    AND COALESCE(measurement_concept_id, 0) != 0
+  )
+  OR (
+    -- b) No hay prioridad, pero sí mapeos (solo estándar)
+    has_priority_map = 0
+    AND has_any_map = 1
+    AND COALESCE(measurement_concept_id, 0) != 0
+  )
+  OR (
+    -- c) No hay ningún mapeo en ninguna capa: dejamos todo (como en tu lógica original)
+    has_any_map = 0
+  )

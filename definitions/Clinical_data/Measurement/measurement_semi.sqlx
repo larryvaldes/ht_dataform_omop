@@ -4,21 +4,48 @@ config {
 
 WITH measurement_base AS(
 select
-ROW_NUMBER() OVER (ORDER BY (Select null)) as measurement_id,
+
 p.person_source_value as person_source_value,
 mv.record_source_id as record_source_id,
 p.person_id as person_id,
 COALESCE(concept.concept_id, 0) as measurement_concept_id,
-mv.measurement_DATE as measurement_DATE,
-null as measurement_DATETIME,
+
+COALESCE(
+  -- 1) Direct ISO 8601 / RFC3339 style with Z or offset
+  SAFE_CAST(mv.measurement_DATE AS TIMESTAMP),
+
+  -- 2) JS Date-style string:
+  --    "Tue Jan 11 2022 00:00:00 GMT-0700 (Mountain Standard Time)"
+  SAFE.PARSE_TIMESTAMP(
+    '%a %b %d %Y %H:%M:%S GMT%z',
+    REGEXP_EXTRACT(
+      mv.measurement_DATE,
+      r'^[A-Za-z]{3} [A-Za-z]{3} \d{1,2} \d{4} \d{2}:\d{2}:\d{2} GMT[+-]\d{4}'
+    )
+  ),
+
+  -- 3) Year-month only: "2023-06" → "2023-06-01 00:00:00"
+  CASE
+    WHEN REGEXP_CONTAINS(mv.measurement_DATE, r'^\d{4}-\d{2}$') THEN
+      SAFE_CAST(CONCAT(mv.measurement_DATE, '-01 00:00:00') AS TIMESTAMP)
+  END,
+
+  -- 4) Year only: "2023" → "2023-01-01 00:00:00"
+  CASE
+    WHEN REGEXP_CONTAINS(mv.measurement_DATE, r'^\d{4}$') THEN
+      SAFE_CAST(CONCAT(mv.measurement_DATE, '-01-01 00:00:00') AS TIMESTAMP)
+  END
+) AS measurement_ts,
+
+
 null as measurement_time,
 null as measurement_type_concept_id,
 null as operator_concept_id,
 mv.value_as_number as value_as_number,
 null as value_as_concept_id,
 null as unit_concept_id,
-mv.range_low as range_low,
-mv.range_high as range_high,
+SAFE_CAST(mv.range_low AS FLOAT64) as range_low,
+SAFE_CAST(mv.range_high AS FLOAT64) as range_high,
 null as provider_id,
 vo.visit_occurrence_id as visit_occurrence_id,
 null as visit_detail_id,
@@ -51,7 +78,9 @@ HAVING
     SELECT x FROM UNNEST(concept_id) AS x
     WHERE x != 0
   )) = 0
-)
+),
+
+pre AS (
 
 SELECT * except(measurement_concept_id), measurement_concept_id FROM measurement_base WHERE measurement_concept_id <> 0
 UNION ALL
@@ -60,4 +89,18 @@ m.measurement_source_code = c.concept_code
 WHERE measurement_concept_id = 0 AND measurement_source_code LIKE "%-%"
 AND m.record_source_id NOT IN (SELECT record_source_id FROM no_mapping_records)
 )
+)
+
+SELECT
+  ROW_NUMBER() OVER (
+    ORDER BY
+      record_source_id,          -- stable key
+      person_id,
+      measurement_source_code,
+      value_source_value
+  ) AS measurement_id,
+  SAFE_CAST(measurement_ts AS DATE) measurement_DATE,
+  SAFE_CAST(measurement_ts AS DATETIME) measurement_DATETIME,
+  pre.* EXCEPT(measurement_ts)
+FROM pre
 

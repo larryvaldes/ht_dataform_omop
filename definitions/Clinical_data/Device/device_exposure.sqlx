@@ -2,15 +2,72 @@ config {
     type: "table"
 }
 
+WITH base AS(
 select
 dv.person_source_value,
 ROW_NUMBER() OVER (ORDER BY (Select null)) AS device_exposure_id,
 p.person_id as person_id,
 null as device_concept_id,
-dv.device_exposure_start_DATE as device_exposure_start_DATE,
-null as device_exposure_start_DATETIME,
-dv.device_exposure_end_DATE as device_exposure_end_DATE,
-null as device_exposure_end_DATETIME,
+--dv.device_exposure_start_DATE as device_exposure_start_DATE,
+--null as device_exposure_start_DATETIME,
+
+COALESCE(
+  -- 1) Direct ISO 8601 / RFC3339 style with Z or offset
+  SAFE_CAST(dv.device_exposure_start_DATE AS TIMESTAMP),
+
+  -- 2) JS Date-style string:
+  --    "Tue Jan 11 2022 00:00:00 GMT-0700 (Mountain Standard Time)"
+  SAFE.PARSE_TIMESTAMP(
+    '%a %b %d %Y %H:%M:%S GMT%z',
+    REGEXP_EXTRACT(
+      dv.device_exposure_start_DATE,
+      r'^[A-Za-z]{3} [A-Za-z]{3} \d{1,2} \d{4} \d{2}:\d{2}:\d{2} GMT[+-]\d{4}'
+    )
+  ),
+
+  -- 3) Year-month only: "2023-06" → "2023-06-01 00:00:00"
+  CASE
+    WHEN REGEXP_CONTAINS(dv.device_exposure_start_DATE, r'^\d{4}-\d{2}$') THEN
+      SAFE_CAST(CONCAT(dv.device_exposure_start_DATE, '-01 00:00:00') AS TIMESTAMP)
+  END,
+
+  -- 4) Year only: "2023" → "2023-01-01 00:00:00"
+  CASE
+    WHEN REGEXP_CONTAINS(dv.device_exposure_start_DATE, r'^\d{4}$') THEN
+      SAFE_CAST(CONCAT(dv.device_exposure_start_DATE, '-01-01 00:00:00') AS TIMESTAMP)
+  END
+) AS device_start_ts,
+
+--dv.device_exposure_end_DATE as device_exposure_end_DATE,
+--null as device_exposure_end_DATETIME,
+
+COALESCE(
+  -- 1) Direct ISO 8601 / RFC3339 style with Z or offset
+  SAFE_CAST(dv.device_exposure_end_DATE AS TIMESTAMP),
+
+  -- 2) JS Date-style string:
+  --    "Tue Jan 11 2022 00:00:00 GMT-0700 (Mountain Standard Time)"
+  SAFE.PARSE_TIMESTAMP(
+    '%a %b %d %Y %H:%M:%S GMT%z',
+    REGEXP_EXTRACT(
+      dv.device_exposure_end_DATE,
+      r'^[A-Za-z]{3} [A-Za-z]{3} \d{1,2} \d{4} \d{2}:\d{2}:\d{2} GMT[+-]\d{4}'
+    )
+  ),
+
+  -- 3) Year-month only: "2023-06" → "2023-06-01 00:00:00"
+  CASE
+    WHEN REGEXP_CONTAINS(dv.device_exposure_end_DATE, r'^\d{4}-\d{2}$') THEN
+      SAFE_CAST(CONCAT(dv.device_exposure_end_DATE, '-01 00:00:00') AS TIMESTAMP)
+  END,
+
+  -- 4) Year only: "2023" → "2023-01-01 00:00:00"
+  CASE
+    WHEN REGEXP_CONTAINS(dv.device_exposure_end_DATE, r'^\d{4}$') THEN
+      SAFE_CAST(CONCAT(dv.device_exposure_end_DATE, '-01-01 00:00:00') AS TIMESTAMP)
+  END
+) AS device_end_ts,
+
 null as device_type_concept_id,
 dv.unique_device_id as unique_device_id,
 null as quantity,
@@ -25,3 +82,11 @@ dv.record_source_id as record_source_id
 
 from
 ${ref("device_valid")} dv join ${ref("person")} p on dv.person_source_value = p.person_source_value
+)
+
+SELECT
+SAFE_CAST(device_start_ts AS DATE) device_exposure_start_DATE,
+SAFE_CAST(device_start_ts AS DATETIME) device_exposure_start_DATETIME,
+SAFE_CAST(device_end_ts AS DATE) device_exposure_end_DATE,
+SAFE_CAST(device_end_ts AS DATETIME) device_exposure_end_DATETIME,
+base.* EXCEPT(device_start_ts, device_end_ts) FROM base

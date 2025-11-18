@@ -6,6 +6,7 @@ select
 p.person_id as person_id,
 p.person_source_value as person_source_value,
 vv.record_source_id as record_source_id,
+vv.fhir_record_id as fhir_record_id,
 ROW_NUMBER() OVER (ORDER BY (Select null))  as visit_occurrence_id,
  null as visit_concept_id,
 vv.visit_start_DATE as visit_start_DATE,

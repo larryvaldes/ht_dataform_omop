@@ -1,0 +1,10 @@
+config { type: "table" }
+
+SELECT
+  lineId,
+  ROW_NUMBER() OVER (ORDER BY lineId) AS episode_id
+FROM (
+  SELECT DISTINCT CAST(lineId AS STRING) lineId
+  FROM ${ref("lot_base")}
+  WHERE lineId IS NOT NULL
+)

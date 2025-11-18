@@ -1,0 +1,44 @@
+config {
+  type: "table"
+}
+
+SELECT
+  p.person_source_value as person_source_value,
+  c.id AS condition_source_id,
+  ROW_NUMBER() OVER (ORDER BY (Select null)) AS condition_occurrence_id,
+  p.person_id AS person_id,
+  COALESCE(concept.concept_id, 0) AS condition_concept_id,
+  COALESCE(c.recordedDate AS DATE, c.onsetDateTime AS DATE) AS condition_start_DATE,
+  COALESCE(c.recordedDate AS DATETIME, c.onsetDateTime AS DATETIME) AS condition_start_DATETIME,
+  COALESCE(c.fhir.onsetPeriod.end , SAFE_CAST(c.fhir.abatementDateTime AS DATE), c.fhir.abatementPeriod.end) AS condition_end_DATE,
+  DATETIME(COALESCE(c.fhir.onsetPeriod.end , SAFE_CAST(c.fhir.abatementDateTime AS DATE), c.fhir.abatementPeriod.end)) AS condition_end_DATETIME,
+  cu.category AS condition_type_value,
+  NULL AS condition_type_concept_id,
+  NULL AS stop_reason,
+  NULL AS provider_id,
+  NULL as visit_occurrence_id,
+  cu.encounter AS visit_occurrence_reference,
+  NULL AS visit_detail_id,
+  cu.display AS condition_source_value,
+  cu.code AS condition_source_concept_id,
+  cu.system AS condition_source_system,
+  cu.status AS condition_status_source_value,
+  NULL AS condition_status_concept_id,
+  cu.fhir_id as record_source_id
+FROM ${ref("condition_valid")} cv
+  LEFT JOIN
+    ${ref("person")} p
+  ON
+    c.user.id = p.person_source_value
+    /*
+JOIN
+  ${ref("conditions_unnested")} cu
+ON
+  c.fhir.id = cu.fhir_id
+LEFT JOIN ${ref("vocabulary_mapping")} vm ON
+LOWER(cu.system) LIKE "%" || LOWER(vm.search_record) ||"%"
+
+LEFT JOIN `healthtree-production.OMOP.Concept` concept ON
+concept.concept_code = cu.code
+AND LOWER(vm.vocabulary_name) LIKE '%' || LOWER(concept.vocabulary_id) || '%'
+*/

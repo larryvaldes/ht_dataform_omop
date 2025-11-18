@@ -10,7 +10,8 @@ select * from `healthtree-production.HT_test_sync.apps-curehub-medicalResources-
 SELECT
 null as visit_occurrence_id,
 user.id as person_source_value,
-fhir.id as record_source_id,
+id as record_source_id,
+fhir.id as fhir_record_id,
   null as visit_concept_id,
   fhir.period.start as visit_start_DATE,
   null as visit_start_DATETIME,
