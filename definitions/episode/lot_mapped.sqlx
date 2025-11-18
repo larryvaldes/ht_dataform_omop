@@ -1,0 +1,96 @@
+-- lot_stage_index.sqlx
+config { type: "view" }
+
+WITH person_norm AS (
+  SELECT
+    REPLACE(LOWER(CAST(person_source_value AS STRING)), 'patient/', '') AS user_norm,
+    MIN(person_id) AS person_id
+  FROM ${ref("person")}
+  GROUP BY 1
+),
+
+/* 1) Base desde lot_plain, normaliza stage y userId, y deduplica stage por (lineId, stage) */
+base AS (
+  SELECT
+    lp.lineId,
+    lp.userId,
+    REPLACE(LOWER(CAST(lp.userId AS STRING)), 'patient/', '') AS user_norm,
+    LOWER(lp.stage) AS stage,
+    lp.list_type,
+    lp.startDate,
+    lp.endDate,
+    lp.diseaseKind,
+    lp.diseaseName,
+    ROW_NUMBER() OVER (
+      PARTITION BY lp.lineId, LOWER(lp.stage)
+      ORDER BY CASE lp.list_type WHEN 'normalizations' THEN 1 ELSE 2 END
+    ) AS rk
+  FROM ${ref("lot_plain")} lp
+  WHERE LOWER(lp.stage) IN ('induction','consolidation','maintenance','intermediate')
+),
+
+stages AS (
+  SELECT * EXCEPT(rk) FROM base WHERE rk = 1
+),
+
+/* 2) Orden solicitado por ti:
+      induction=1, consolidation=2, maintenance=3, intermediate=4
+   (Si prefieres el orden clínico estándar, cambia los valores aquí.) */
+stage_order AS (
+  SELECT 'induction' AS stage, 1 AS desired_ord UNION ALL
+  SELECT 'consolidation',       2                UNION ALL
+  SELECT 'maintenance',         4                UNION ALL
+  SELECT 'intermediate',        3
+),
+
+with_ord AS (
+  SELECT s.*, so.desired_ord
+  FROM stages s
+  JOIN stage_order so USING (stage)
+),
+
+with_person AS (
+  SELECT
+    w.*,
+    pn.person_id
+  FROM with_ord w
+  LEFT JOIN person_norm pn USING (user_norm)
+),
+
+/* 3) Compacta sin huecos por persona+lineId.
+      Usamos person_key (person_id o user_norm) para cubrir nulos. */
+numbered AS (
+  SELECT
+    lineId,
+    person_id,
+    userId,
+    user_norm,
+    COALESCE(CAST(person_id AS STRING), user_norm) AS person_key,
+    diseaseKind,
+    diseaseName,
+    stage,
+    desired_ord,
+    -- Aquí se comprimen los números 1..N según la presencia real de stages:
+    DENSE_RANK() OVER (
+      PARTITION BY COALESCE(CAST(person_id AS STRING), user_norm), lineId
+      ORDER BY desired_ord
+    ) AS episode_stage_number,
+    startDate,
+    endDate
+  FROM with_person
+)
+
+SELECT
+  person_id,
+  userId,
+  lineId,
+  diseaseKind,
+  diseaseName,
+  stage,                        -- induction / consolidation / maintenance / intermediate
+  episode_stage_number,         -- 1..N sin huecos según tu orden deseado
+  desired_ord AS stage_precedence, -- referencia del orden “canónico” que elegiste
+  DATE(startDate) AS lot_start_date,
+  DATE(endDate)   AS lot_end_date
+FROM numbered
+WHERE person_id IS NOT NULL
+ORDER BY COALESCE(CAST(person_id AS STRING), user_norm), lineId, episode_stage_number

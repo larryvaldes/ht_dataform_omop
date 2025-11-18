@@ -1,0 +1,86 @@
+config { type: "table" }
+
+WITH parents AS (
+  SELECT
+    'P' AS rec_type,
+    lineId,
+    person_id,
+    episode_number,
+    32941 AS episode_concept_id,
+    CAST(NULL AS INT64) AS episode_parent_id,
+    episode_object_concept_id,
+    episode_start_date,
+    episode_start_datetime,
+    episode_end_date,
+    episode_end_datetime
+  FROM ${ref("episode_lines_parent")}
+),
+children_raw AS (
+  SELECT
+    'C' AS rec_type,
+    lineId,
+    person_id,
+    episode_number,
+    episode_concept_id,
+    CAST(NULL AS INT64) AS episode_parent_id,
+    episode_object_concept_id,
+    episode_start_date,
+    episode_start_datetime,
+    episode_end_date,
+    episode_end_datetime,
+    stage, list_type, item_kind, item_name
+  FROM ${ref("episode_events_child")}
+),
+parents_with_id AS (
+  SELECT
+    ROW_NUMBER() OVER (
+      ORDER BY COALESCE(person_id,-1), episode_number, lineId
+    ) AS episode_id,
+    p.*
+  FROM parents p
+),
+children_with_parent AS (
+  SELECT
+    cr.*,
+    pw.episode_id AS resolved_parent_id
+  FROM children_raw cr
+  JOIN parents_with_id pw
+    ON cr.lineId = pw.lineId
+    AND (cr.person_id = pw.person_id OR (cr.person_id IS NULL AND pw.person_id IS NULL))
+),
+children_with_ids AS (
+  SELECT
+    (SELECT MAX(episode_id) FROM parents_with_id)
+      + ROW_NUMBER() OVER (
+          ORDER BY COALESCE(person_id,-1), episode_number, lineId, stage, list_type, item_kind, item_name
+        ) AS episode_id,
+    cr.rec_type,
+    cr.lineId,
+    cr.person_id,
+    cr.episode_number,
+    cr.episode_concept_id,
+    cr.resolved_parent_id AS episode_parent_id,
+    cr.episode_object_concept_id,
+    cr.episode_start_date,
+    cr.episode_start_datetime,
+    cr.episode_end_date,
+    cr.episode_end_datetime
+  FROM children_with_parent cr
+),
+final_union AS (
+  SELECT * FROM parents_with_id
+  UNION ALL
+  SELECT * FROM children_with_ids
+)
+SELECT DISTINCT
+  episode_id,
+  person_id,
+  episode_concept_id,
+  episode_start_date,
+  episode_end_date,
+  episode_parent_id,
+  episode_number,
+  episode_object_concept_id
+FROM final_union
+WHERE person_id IS NOT NULL
+ORDER BY episode_id

@@ -4,22 +4,22 @@ config { type: "view" }
 
 (SELECT
   user.id AS userId,
-  fhir.id AS record_source_id,
-  bo.reference,
+  id AS record_source_id,
+  SPLIT(bo.reference, "/")[1] as reference,
   bo.display,
   bo.type,
   fhir.authoredOn,
   "basedOn" as source_field
 FROM `healthtree-production.HT_test_sync.apps-curehub-medicalResources-r4-MedicationRequest`
 CROSS JOIN UNNEST(IFNULL(fhir.basedOn, [])) AS bo
-WHERE bo.reference IS NOT NULL AND bo.reference != '')
+WHERE bo.reference IS NOT NULL AND bo.reference != '' AND bo.type != "CarePlan")
 
 UNION ALL
 
 (SELECT
 user.id as userId,
-fhir.id as record_source_id,
-fhir.encounter.reference as reference,
+id as record_source_id,
+SPLIT(fhir.encounter.reference, "/")[1] as reference,
 fhir.encounter.display as display,
 "Encounter" as type,
 fhir.authoredOn,
@@ -31,7 +31,7 @@ UNION ALL
 
 (SELECT
 user.id as userId,
-fhir.id as record_source_id,
+id as record_source_id,
 SPLIT(fhir.priorPrescription.reference, "/")[1] as reference,
 fhir.priorPrescription.display as display,
 "MedicationRequest" as type,

@@ -1,0 +1,12 @@
+config { type: "view" }
+
+SELECT
+  `__key__`.name AS lineId,
+  user.name      AS userId,
+  disease.kind   AS diseaseKind,
+  disease.name   AS diseaseName,
+  startDate,
+  endDate,
+  bestOutcome,
+  lastOutcome
+FROM `healthtree-production.HT.linesOfTherapy`

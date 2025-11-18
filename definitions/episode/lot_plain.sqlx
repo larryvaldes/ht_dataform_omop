@@ -23,7 +23,7 @@ WITH lot AS (
 -- CONSOLIDATION - mappings
 SELECT
   lineId, userId, diseaseKind, diseaseName, startDate, endDate, bestOutcome, lastOutcome,
-  'consolidation' AS section,
+  'consolidation' AS stage,
   'mappings'      AS list_type,
   m.kind          AS item_kind,
   m.name          AS item_name
