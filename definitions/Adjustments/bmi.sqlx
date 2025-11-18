@@ -1,0 +1,25 @@
+config {
+  type: "table"
+}
+
+SELECT 
+3038553 AS measurement_concept_id,
+  
+  4172703 AS operator_concept_id,
+
+  9531 AS unit_concept_id,
+
+* EXCEPT(unit_concept_id, measurement_concept_id, operator_concept_id)
+FROM ${ref("measurement_semi")}
+WHERE measurement_source_code in ("39156-5",
+"162859006",
+"140075008",
+"363807006",
+"60621009",
+"D015992",
+"LP35925-4",
+"140156",
+"C16358-BMI",
+"710091000000105",
+"140075008",
+"363807006")

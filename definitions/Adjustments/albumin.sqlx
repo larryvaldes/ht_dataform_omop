@@ -1,0 +1,51 @@
+config {
+  type: "table"
+}
+
+WITH ts AS(
+SELECT 
+3024561 AS measurement_concept_id,
+
+      CASE
+    WHEN REGEXP_CONTAINS(
+      LOWER(TRIM(unit_source_value)),
+      r'^(?:' ||
+        -- g/dl, gm/dl, con o sin espacios: "g/dl", "gm/dl", "g / dl"
+        r'g(?:m)?\s*/\s*dl' ||
+      r'|' ||
+        -- variantes sin slash: "gdl", "gdl."
+        r'gdl\.?' ||
+      r'|' ||
+        -- "gram/dl" o "grams/dl"
+        r'grams?\s*/\s*dl' ||
+      r'|' ||
+        -- "grams/deciliter" o "gram/deciliter", acepta -er / -re (US/UK)
+        r'grams?\s*/\s*decilit(?:er|re)s?' ||
+      r'|' ||
+        -- formatos con "per": "g per dl", "grams per deciliter"
+        r'grams?\s+per\s+decilit(?:er|re)s?' ||
+      r')$'
+    )
+    THEN 8713
+    WHEN REGEXP_CONTAINS(LOWER(TRIM(unit_source_value)), r"g/l")
+    THEN 8636
+    WHEN unit_source_value = "%" or unit_source_value = "relative %" THEN 8554
+    ELSE NULL
+  END AS unit_concept_id,
+
+  4172703 AS operator_concept_id,
+
+* EXCEPT(measurement_concept_id, unit_concept_id,
+operator_concept_id)
+FROM ${ref("measurement_semi")}
+
+WHERE measurement_source_code IN (
+    '1751-7',   -- Albumin
+    '2862-1',
+    '54347-0',
+    '61151-7',
+    '61152-5'
+  )
+)
+
+SELECT * FROM ts

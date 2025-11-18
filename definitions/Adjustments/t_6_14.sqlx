@@ -1,0 +1,17 @@
+config {
+  type: "table"
+}
+
+SELECT
+19642743 AS observation_concept_id,
+
+* EXCEPT(observation_concept_id)
+FROM ${ref("observation_semi")}
+WHERE
+  LOWER(TRIM(REGEXP_EXTRACT(TRIM(observation_source_code), r'([^/]+)$')))
+  IN (
+    "ffd4a1b28b65edaf4cf7409934f1cfbde9b33b3962cb80a95615d81a9bb54612",
+    "wpUt44xZGhLa3I5JZW22"
+)
+OR
+LOWER(observation_source_value) like "%t(6;14)%"

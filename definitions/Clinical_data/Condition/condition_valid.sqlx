@@ -2,6 +2,23 @@ config {
     type: "view"
 }
 
-
-select * from `healthtree-production.HT_test_sync.apps-curehub-medicalResources-r4-Condition` where fhir is not null and user.id in
+/*
+select
+nc AS nc,
+rc AS rc
+from `healthtree-production.HT_test_sync.apps-curehub-medicalResources-normalizations-Condition` nc LEFT JOIN
+`healthtree-production.HT_test_sync.apps-curehub-medicalResources-r4-Condition` rc ON nc.medicalResource.id = rc.id
+where nc.user.id in
 (Select person_source_value from ${ref("allPersons")})
+*/
+
+SELECT 
+rC as rc,
+nC as nc
+FROM `healthtree-production.HT_test_sync.apps-curehub-medicalResources-r4-Condition` rC 
+INNER JOIN `healthtree-production.HT_test_sync.apps-curehub-medicalResources-normalizations-Condition` nC ON nC.id = rC.id
+WHERE 
+(rC.migratedFromRailsHealthtree = false OR rC.migratedFromRailsHealthtree IS NULL) AND
+(nC.success = true) AND
+(nC.useInLogicDisallowed = false OR nC.useInLogicDisallowed IS NULL) AND
+nC.user.id IN (SELECT person_source_value FROM ${ref("allPersons")})

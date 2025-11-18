@@ -1,0 +1,35 @@
+config {
+  type: "table"
+}
+
+SELECT 
+3036277 AS measurement_concept_id,
+
+  CASE
+    -- caso literal alternativo: [in_i] => pulgadas
+    WHEN REGEXP_CONTAINS(LOWER(TRIM(unit_source_value)), r'^\[in_i\]$')
+      THEN 9327
+    -- pulgadas: in, in., inch, inches, y la forma literal "inch(es)"
+    WHEN REGEXP_CONTAINS(LOWER(TRIM(unit_source_value)),
+         r'^(?:in\.?|inch(?:es)?|inch\(es\))$')
+      THEN 9327
+    -- centímetros: cm, cms, cm., centimet(er|re)(s)
+    WHEN REGEXP_CONTAINS(LOWER(TRIM(unit_source_value)),
+         r'^(?:cms?\.?|centimet(?:er|re)(?:s)?)$')
+      THEN 8582
+    -- metros: m, m., meter(s), metre(s)
+    WHEN REGEXP_CONTAINS(LOWER(TRIM(unit_source_value)),
+         r'^(?:m\.?|meter(?:s)?|metre(?:s)?)$')
+      THEN 9546
+    ELSE NULL
+  END AS unit_concept_id,
+  
+  4172703 AS operator_concept_id,
+
+* EXCEPT(unit_concept_id, measurement_concept_id, operator_concept_id)
+FROM ${ref("measurement_semi")}
+WHERE measurement_source_code like "8302-2"
+OR measurement_source_code like "50373000"
+or measurement_source_code like "8308-9"
+or measurement_source_code like "8301-4"
+or measurement_source_code like "1162418000"

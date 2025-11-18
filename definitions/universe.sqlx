@@ -1,0 +1,15 @@
+config {
+    type: "table"
+}
+
+SELECT
+  DISTINCT(rp.user.id) as patient_id, u.email
+FROM
+  `healthtree-production.HT_test_sync.apps-curehub-medicalResources-r4-Patient` rp
+  LEFT JOIN `healthtree-production.HT.users` u ON rp.user.id = u.userId
+WHERE
+
+  rp.user.id not in (
+    SELECT userId FROM HT.users WHERE (email LIKE '%healthtree.org' AND email NOT LIKE "jenny@healthtree.org")
+    OR email LIKE '%deleted.com%'
+  )

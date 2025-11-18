@@ -1,0 +1,17 @@
+config {
+  type: "table"
+}
+
+SELECT
+4048414 AS observation_concept_id,
+
+* EXCEPT(observation_concept_id)
+FROM ${ref("observation_semi")}
+WHERE
+  LOWER(TRIM(REGEXP_EXTRACT(TRIM(observation_source_code), r'([^/]+)$')))
+  IN (
+"e37a06c6ad2e3c9af49d713ec12af414a506c30d9e9aecfd80377467c9bab962",
+"127d4ffaa7cbf0b793295a520aef4d245b1d008ba21f6fc9ad53502ac7532c4c"
+)
+OR
+LOWER(observation_source_value) like "%hypoploidy%"

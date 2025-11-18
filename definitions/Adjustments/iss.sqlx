@@ -1,0 +1,50 @@
+config {
+  type: "table"
+}
+
+WITH base AS(
+    SELECT
+    (user_id).SPLIT("/")[1] AS person_source_value,
+    * EXCEPT(user_id, patient_id) FROM ${ref("test_iss")} WHERE LOWER(iss_stage) LIKE "%stage%"
+)
+
+SELECT
+734337 AS observation_concept_id,
+GREATEST(base.b2m_observation_date, base.albumin_observation_date, base.ldh_date) AS observation_DATE,
+SAFE_CAST(GREATEST(base.b2m_observation_date, base.albumin_observation_date, base.ldh_date) AS DATETIME) AS observation_DATETIME,
+null as observation_id,
+base.person_source_value,
+p.person_id,
+null as observation_type_concept_id,
+CASE
+WHEN LOWER(iss_stage) like "stage 1" THEN 1
+WHEN LOWER(iss_stage) like "stage 2" THEN 2
+WHEN LOWER(iss_stage) like "stage 3" THEN 3
+ELSE 0 END AS value_as_number,
+SAFE_CAST(null AS STRING) as value_as_string,
+CASE
+WHEN LOWER(iss_stage) like "stage 1" THEN 1633361
+WHEN LOWER(iss_stage) like "stage 2" THEN 1634176
+WHEN LOWER(iss_stage) like "stage 3" THEN 1633524
+ELSE 0 END AS value_as_concept_id,
+0 as qualifier_concept_id,
+0 as unit_concept_id,
+null as provider_id,
+null as visit_occurrence_id,
+null as visit_detail_id,
+SAFE_CAST(null AS STRING) as observation_source_value,
+0 as observation_source_concept_id,
+SAFE_CAST(null AS STRING) as unit_source_value,
+SAFE_CAST(null AS STRING) as qualifier_source_value,
+SAFE_CAST(null AS STRING) as visit_occurrence_reference,
+SAFE_CAST(null AS STRING) as visit_occurrence_type,
+SAFE_CAST(null AS STRING) as observation_source_code,
+SAFE_CAST(null AS STRING) as observation_source_system,
+SAFE_CAST(null AS STRING) as observation_source_type,
+SAFE_CAST(null AS STRING) as observation_source_status,
+SAFE_CAST(null AS STRING) as range_low,
+SAFE_CAST(null AS STRING) as range_high,
+SAFE_CAST(null AS STRING) as record_source_id
+FROM base
+LEFT JOIN ${ref("person")} p ON
+base.person_source_value = p.person_source_value
