@@ -13,7 +13,7 @@ Intermediate as
 (
 SELECT 
     patient_id,
-    ARRAY_AGG(CASE WHEN LOWER(race_source_value) like "%white%" or LOWER(race_source_value) like "%black%"
+ARRAY_AGG(CASE WHEN LOWER(race_source_value) like "%white%" or LOWER(race_source_value) like "%black%"
     or LOWER(race_source_value) like "%asian%" or LOWER(race_source_value) like "%african%" then race_source_value
     WHEN LOWER(race_source_value) like "%unknown%" or LOWER(race_source_value) like "%other%" or
     LOWER(race_source_value) like "%decline%" then null

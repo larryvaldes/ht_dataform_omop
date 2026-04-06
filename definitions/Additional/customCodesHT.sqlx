@@ -1,0 +1,55 @@
+config {
+  type: "table"
+}
+
+WITH src AS(
+SELECT
+
+__key__.name AS concept_code,
+name AS concept_name,
+"Observation" AS domain_id,
+"Healthtree Genetics" as vocabulary_id,
+"Genetic Variation" AS concept_class_id,
+SAFE_CAST(null AS STRING) AS standard_concept,
+DATE("1970-01-01") AS valid_start_date,
+DATE("2099-12-31") AS valid_end_date,
+SAFE_CAST(null AS STRING) AS invalid_reason
+
+FROM HT.observationMappings
+WHERE section = 'GENETICS' AND custom = TRUE
+)
+
+SELECT
+
+  CAST(2000020001
+       + ROW_NUMBER() OVER (ORDER BY concept_code) 
+       - 1 AS INT64) AS concept_id,
+
+
+  concept_name,
+  domain_id,
+  vocabulary_id,
+  concept_class_id,
+  standard_concept,
+  concept_code,
+  valid_start_date,
+  valid_end_date,
+  invalid_reason
+
+FROM src
+
+UNION ALL
+(
+    SELECT
+  2000020000 AS concept_id,
+  'Healthtree Genetics' AS concept_name,
+  'Metadata' AS domain_id,
+  'Vocabulary' AS vocabulary_id,
+  'Vocabulary' AS concept_class_id,
+  'C' AS standard_concept,
+  'Healthtree Genetics' AS concept_code,
+  DATE '1970-01-01' AS valid_start_date,
+  DATE '2099-12-31' AS valid_end_date,
+  SAFE_CAST(null AS STRING) AS invalid_reason
+)
+ORDER BY concept_id

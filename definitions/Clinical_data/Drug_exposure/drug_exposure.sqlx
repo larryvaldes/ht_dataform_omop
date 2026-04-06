@@ -2,24 +2,141 @@ config {
   type: "table"
 }
 
--- 1) Tabla base
-WITH base AS (
-  SELECT *
-  FROM ${ref("drug_exposure_semi")}   -- ⇐ ajusta si no usas ref()
+-- 1) Universo estándar (tipado para que el UNION sea estable)
+WITH standard AS (
+  SELECT
+    drug_exposure_id,
+    person_id,
+    person_source_value,
+    record_source_id,
+    CAST(fhir_record_id AS STRING) AS fhir_record_id,
+    CAST(drug_concept_id AS INT64) AS drug_concept_id,
+
+    CAST(drug_exposure_start_DATE AS DATE) AS drug_exposure_start_DATE,
+    CAST(drug_exposure_start_DATETIME AS DATETIME) AS drug_exposure_start_DATETIME,
+    CAST(drug_exposure_end_DATE AS DATE) AS drug_exposure_end_DATE,
+    CAST(drug_exposure_end_DATETIME AS DATETIME) AS drug_exposure_end_DATETIME,
+    CAST(verbatim_end_DATE AS DATE) AS verbatim_end_DATE,
+
+    CAST(drug_type_concept_id AS INT64) AS drug_type_concept_id,
+    CAST(stop_reason AS STRING) AS stop_reason,
+    CAST(refills AS INT64) AS refills,
+    CAST(quantity AS FLOAT64) AS quantity,
+    CAST(days_supply AS INT64) AS days_supply,
+    CAST(sig AS STRING) AS sig,
+    CAST(route_concept_id AS INT64) AS route_concept_id,
+    CAST(lot_number AS STRING) AS lot_number,
+    CAST(provider_id AS INT64) AS provider_id,
+    CAST(visit_occurrence_id AS INT64) AS visit_occurrence_id,
+    CAST(visit_detail_id AS INT64) AS visit_detail_id,
+
+    CAST(drug_source_value AS STRING) AS drug_source_value,
+    CAST(drug_source_concept_id AS INT64) AS drug_source_concept_id,
+    CAST(route_source_value AS STRING) AS route_source_value,
+    CAST(dose_unit_source_value AS STRING) AS dose_unit_source_value,
+
+    CAST(visit_occurrence_reference AS STRING) AS visit_occurrence_reference,
+    CAST(visit_occurrence_type AS STRING) AS visit_occurrence_type,
+    CAST(drug_source_code AS STRING) AS drug_source_code,
+    CAST(drug_source_system AS STRING) AS drug_source_system,
+    CAST(drug_source_status AS STRING) AS drug_source_status,
+    CAST(drug_source_category AS STRING) AS drug_source_category
+  FROM ${ref("drug_exposure_semi")}
 ),
 
--- 2) Marca por par (persona, registro fuente) si existe algún mapeo ≠ 0
+standard_max AS (
+  SELECT COALESCE(MAX(drug_exposure_id), 0) AS mx
+  FROM standard
+),
+
+-- 2) Universo artificial ya mapeado (RxNorm -> concept_id)
+art_mapped AS (
+  SELECT
+    m.* EXCEPT(drug_concept_id, drug_name),
+    COALESCE(m.drug_concept_id, 0) AS drug_concept_id
+  FROM ${ref("artMedMap")} m
+),
+
+-- 3) Adaptar artificials al MISMO esquema del universo estándar
+art_universe AS (
+  SELECT
+    (standard_max.mx + ROW_NUMBER() OVER (ORDER BY (SELECT NULL))) AS drug_exposure_id,
+
+    p.person_id AS person_id,
+    a.userId AS person_source_value,
+
+    CONCAT(
+      'ART_MED|',
+      CAST(ABS(FARM_FINGERPRINT(CONCAT(
+        a.userId, '|',
+        a.lineOfTherapyId, '|',
+        a.drug_source_value, '|',
+        CAST(a.drug_exposure_start_date AS STRING), '|',
+        a.phase
+      ))) AS STRING)
+    ) AS record_source_id,
+
+    CAST(NULL AS STRING) AS fhir_record_id,
+
+    CAST(a.drug_concept_id AS INT64) AS drug_concept_id,
+
+    CAST(a.drug_exposure_start_date AS DATE) AS drug_exposure_start_DATE,
+    CAST(a.drug_exposure_start_datetime AS DATETIME) AS drug_exposure_start_DATETIME,
+    CAST(a.drug_exposure_end_date AS DATE) AS drug_exposure_end_DATE,
+    CAST(a.drug_exposure_end_datetime AS DATETIME) AS drug_exposure_end_DATETIME,
+    CAST(NULL AS DATE) AS verbatim_end_DATE,
+
+    CAST(NULL AS INT64) AS drug_type_concept_id,
+    CAST(NULL AS STRING) AS stop_reason,
+    CAST(NULL AS INT64) AS refills,
+    CAST(NULL AS FLOAT64) AS quantity,
+    CAST(NULL AS INT64) AS days_supply,
+    CAST(NULL AS STRING) AS sig,
+    CAST(a.route_concept_id AS INT64) AS route_concept_id,
+    CAST(NULL AS STRING) AS lot_number,
+    CAST(NULL AS INT64) AS provider_id,
+    CAST(NULL AS INT64) AS visit_occurrence_id,
+    CAST(NULL AS INT64) AS visit_detail_id,
+
+    CAST(a.drug_source_value AS STRING) AS drug_source_value,
+
+    -- source_concept_id: como tu source es RxNorm, lo dejamos coherente con el mapeo (o 0)
+    CAST(COALESCE(a.drug_concept_id, 0) AS INT64) AS drug_source_concept_id,
+
+    CAST(a.route_source_value AS STRING) AS route_source_value,
+    CAST(NULL AS STRING) AS dose_unit_source_value,
+
+    CAST(NULL AS STRING) AS visit_occurrence_reference,
+    CAST(NULL AS STRING) AS visit_occurrence_type,
+
+    CAST(a.drug_source_value AS STRING) AS drug_source_code,
+    'RxNorm' AS drug_source_system,
+    'ARTIFICIAL' AS drug_source_status,
+    CAST(a.phase AS STRING) AS drug_source_category
+
+  FROM art_mapped a
+  CROSS JOIN standard_max
+  LEFT JOIN ${ref("person")} p
+    ON p.person_source_value = a.userId
+),
+
+-- 4) Universo combinado
+base AS (
+  SELECT * FROM standard
+  UNION ALL
+  SELECT * FROM art_universe
+),
+
+-- 5) Marca por par (persona, registro fuente) si existe algún mapeo ≠ 0
 flagged AS (
   SELECT
     b.*,
-    MAX( IF(COALESCE(b.drug_concept_id, 0) != 0, 1, 0) )
+    MAX(IF(COALESCE(b.drug_concept_id, 0) != 0, 1, 0))
       OVER (PARTITION BY b.person_source_value, b.record_source_id) AS has_mapped_in_pair
   FROM base b
 )
 
--- 3) Regla de filtrado:
---    - Si en el par hay algún mapeo ≠ 0 (has_mapped_in_pair = 1), solo mostramos las filas ≠ 0.
---    - Si en el par NO hay mapeos ≠ 0 (has_mapped_in_pair = 0), mostramos todo (incluidos 0).
+-- 6) Regla final (igual a la tuya)
 SELECT
   * EXCEPT(has_mapped_in_pair)
 FROM flagged

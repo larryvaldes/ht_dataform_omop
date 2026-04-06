@@ -180,7 +180,7 @@ select
 
   -- Otros campos útiles
   medSystem                           as drug_source_system,
-  null                                as verbatim_end_date,
+  CAST(null AS DATE)                  as verbatim_end_date,
   null                                as drug_type_concept_id,
   null                                as stop_reason,
   null                                as refills,

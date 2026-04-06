@@ -1,0 +1,114 @@
+config {
+    type: "table"
+}
+
+WITH base AS (
+  SELECT
+    id AS lot_row_id,
+    lineOfTherapyId,
+    userId,
+    diseaseId,
+    diseaseName,
+    startDate,
+    endDate,
+    ongoingLineOfTherapy,
+    currentLineOfTherapy,
+    validated,
+    aINeedsValidation,
+    listOfActiveIngredientsRxcui,
+    listOfActiveIngredientsUsedDuringInductionRxcui,
+    listOfActiveIngredientsUsedDuringMaintenanceRxcui
+  FROM `healthtree-production.ANISH.linesOfTherapy`
+),
+
+exploded AS (
+  -- Global meds
+  SELECT
+    lot_row_id,
+    lineOfTherapyId,
+    userId,
+    diseaseId,
+    diseaseName,
+    'overall' AS phase,
+    rxcui AS drug_source_value,           -- RxCUI como source_value
+    SAFE_CAST(rxcui AS INT64) AS rxcui_int64,
+    startDate AS fallback_start_datetime,
+    endDate AS fallback_end_datetime
+  FROM base, UNNEST(base.listOfActiveIngredientsRxcui) AS rxcui
+
+  UNION ALL
+
+  -- Induction meds
+  SELECT
+    lot_row_id,
+    lineOfTherapyId,
+    userId,
+    diseaseId,
+    diseaseName,
+    'induction' AS phase,
+    rxcui AS drug_source_value,
+    SAFE_CAST(rxcui AS INT64) AS rxcui_int64,
+    startDate AS fallback_start_datetime,
+    endDate AS fallback_end_datetime
+  FROM base, UNNEST(base.listOfActiveIngredientsUsedDuringInductionRxcui) AS rxcui
+
+  UNION ALL
+
+  -- Maintenance meds
+  SELECT
+    lot_row_id,
+    lineOfTherapyId,
+    userId,
+    diseaseId,
+    diseaseName,
+    'maintenance' AS phase,
+    rxcui AS drug_source_value,
+    SAFE_CAST(rxcui AS INT64) AS rxcui_int64,
+    startDate AS fallback_start_datetime,
+    endDate AS fallback_end_datetime
+  FROM base, UNNEST(base.listOfActiveIngredientsUsedDuringMaintenanceRxcui) AS rxcui
+),
+
+dedup AS (
+  -- Evita duplicados (mismo RxCUI repetido entre listas/fases)
+  SELECT
+    *,
+    ROW_NUMBER() OVER (
+      PARTITION BY userId, lineOfTherapyId, drug_source_value
+      ORDER BY
+        -- prioridad: si aparece en overall y además en fases, nos quedamos con la fase más específica
+        CASE phase WHEN 'induction' THEN 1 WHEN 'maintenance' THEN 2 ELSE 3 END
+    ) AS rn
+  FROM exploded
+)
+
+SELECT
+  -- IDs de tracking
+  lot_row_id,
+  lineOfTherapyId,
+  userId,
+  diseaseId,
+  diseaseName,
+  phase,
+
+  -- Valores para alimentar drug_exposure (staging)
+  drug_source_value,                      -- RxCUI
+  rxcui_int64,                            -- RxCUI como int (por si lo necesitas)
+
+  -- Fechas fallback de la línea (si no hay fecha por medicamento)
+  fallback_start_datetime AS drug_exposure_start_datetime,
+  fallback_end_datetime   AS drug_exposure_end_datetime,
+  DATE(fallback_start_datetime) AS drug_exposure_start_date,
+  DATE(fallback_end_datetime)   AS drug_exposure_end_date,
+
+  -- Campos típicos OMOP que no tienes aquí (los dejas NULL o los llenas luego)
+  CAST(NULL AS INT64)  AS person_id,               -- si luego mapeas userId -> person_id
+  CAST(NULL AS INT64)  AS drug_concept_id,         -- si luego mapeas RxCUI -> concept_id
+  CAST(NULL AS INT64)  AS drug_type_concept_id,
+  CAST(NULL AS STRING) AS route_source_value,
+  CAST(NULL AS INT64)  AS route_concept_id
+
+FROM dedup
+WHERE rn = 1
+  AND drug_source_value IS NOT NULL
+  AND drug_source_value != ''

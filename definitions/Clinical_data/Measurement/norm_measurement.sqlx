@@ -1,0 +1,219 @@
+config {
+    type: "table"
+}
+
+WITH mea_with_coding AS (
+  SELECT
+    o.*,
+    (
+      SELECT code
+      FROM (
+        SELECT
+          c.code AS code,
+          -- ¿Es numérico puro?
+          REGEXP_CONTAINS(c.code, r'^[0-9]+$') AS is_numeric,
+          -- ¿Es numérico de un solo dígito?
+          REGEXP_CONTAINS(c.code, r'^[0-9]$') AS is_single_digit_numeric,
+          -- ¿Tiene pinta de LOINC? (números + '-' + algo alfanumérico)
+          REGEXP_CONTAINS(c.code, r'^[0-9]+-[0-9A-Za-z]+$') AS is_loinc,
+          SAFE_CAST(c.code AS INT64) AS numeric_code,
+          -- Prioridad para elegir el mejor código
+          CASE
+            WHEN REGEXP_CONTAINS(c.code, r'^[0-9]+-[0-9A-Za-z]+$')
+              THEN 1                      -- primero LOINC
+            WHEN REGEXP_CONTAINS(c.code, r'^[0-9]+$')
+                 AND NOT REGEXP_CONTAINS(c.code, r'^[0-9]$')
+              THEN 2                      -- luego numérico de 2+ dígitos
+            ELSE 99                       -- textos, un dígito, etc.
+          END AS priority
+        FROM UNNEST(o.fhir.valueCodeableConcept.coding) AS c
+        WHERE c.code IS NOT NULL
+      )
+      -- solo candidatos válidos
+      WHERE priority IN (1, 2)
+      -- 1) LOINC primero, 2) luego numérico más grande, 3) desempate por texto
+      ORDER BY
+        priority,
+        numeric_code DESC,
+        code
+      LIMIT 1
+    ) AS valueCodeableConcept_selected_code
+  FROM `healthtree-production.HT_test_sync.apps-curehub-medicalResources-r4-Observation` AS o
+  -- solo registros que SÍ tienen algo en coding
+  WHERE ARRAY_LENGTH(o.fhir.valueCodeableConcept.coding) > 0
+),
+
+mea_without_coding AS (
+  SELECT
+    o.*,
+    STRING(NULL) AS valueCodeableConcept_selected_code
+  FROM `healthtree-production.HT_test_sync.apps-curehub-medicalResources-r4-Observation` AS o
+  -- registros donde el array es NULL o vacío
+  WHERE ARRAY_LENGTH(o.fhir.valueCodeableConcept.coding) IS NULL
+     OR ARRAY_LENGTH(o.fhir.valueCodeableConcept.coding) = 0
+),
+
+base_r4 AS(
+SELECT *
+FROM obs_with_coding
+UNION ALL
+SELECT *
+FROM obs_without_coding
+),
+
+filtered_r4 AS(
+SELECT * FROM base_r4
+  WHERE
+(migratedFromRailsHealthtree = false OR migratedFromRailsHealthtree IS NULL)
+AND
+(source.name IS NULL OR source.name != 'HEALTH_TREE_AI')
+),
+
+-----
+
+norm AS (
+  SELECT
+  n.* EXCEPT(observationMappings, normalizationHelpers),
+    om.id AS mapping_id
+  FROM `healthtree-production.HT_test_sync.apps-curehub-medicalResources-normalizations-Observation` n,
+       UNNEST(n.observationMappings) om
+  LEFT JOIN filtered_r4 r4
+  ON medicalResource.id = r4.id
+       WHERE 
+       (n.migratedFromRailsHealthtree = false OR n.migratedFromRailsHealthtree IS NULL) AND
+(n.success = true) AND
+(n.useInLogicDisallowed = false OR n.useInLogicDisallowed IS NULL) AND
+n.user.id IN (SELECT ap.person_source_value FROM ${ref("allPersons")} ap)
+AND (sourceName IS NULL OR sourceName != "HEALTH_TREE_AI" OR (validated AND isCorrect))
+AND (r4.fhir IS NULL OR r4.fhir.valueQuantity IS NOT NULL)
+),
+
+
+r4 AS(
+SELECT * FROM filtered_r4
+WHERE
+id IN (SELECT DISTINCT medicalResource.id FROM norm)
+),
+
+--norm records:
+--r4 records:
+
+intermediate AS (
+
+SELECT
+ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS measurement_id,
+norm.user.id AS person_source_value,
+norm.medicalResource.id AS record_source_id,
+p.person_id AS person_id,
+COALESCE(map_om.concept_id, 0) AS measurement_concept_id,
+
+--DATE(SAFE_CAST(r4.fhir.effectiveDateTime AS TIMESTAMP)) AS observation_DATE,
+--DATETIME(SAFE_CAST(r4.fhir.effectiveDateTime AS TIMESTAMP)) AS observation_DATETIME,
+
+DATE(COALESCE(
+  -- 1) Direct ISO 8601 / RFC3339 style with Z or offset
+  SAFE_CAST(r4.fhir.effectiveDateTime AS TIMESTAMP),
+
+  -- 2) JS Date-style string:
+  --    "Tue Jan 11 2022 00:00:00 GMT-0700 (Mountain Standard Time)"
+  SAFE.PARSE_TIMESTAMP(
+    '%a %b %d %Y %H:%M:%S GMT%z',
+    REGEXP_EXTRACT(
+      r4.fhir.effectiveDateTime,
+      r'^[A-Za-z]{3} [A-Za-z]{3} \d{1,2} \d{4} \d{2}:\d{2}:\d{2} GMT[+-]\d{4}'
+    )
+  ),
+
+  -- 3) Year-month only: "2023-06" → "2023-06-01 00:00:00"
+  CASE
+    WHEN REGEXP_CONTAINS(r4.fhir.effectiveDateTime, r'^\d{4}-\d{2}$') THEN
+      SAFE_CAST(CONCAT(r4.fhir.effectiveDateTime, '-01 00:00:00') AS TIMESTAMP)
+  END,
+
+  -- 4) Year only: "2023" → "2023-01-01 00:00:00"
+  CASE
+    WHEN REGEXP_CONTAINS(r4.fhir.effectiveDateTime, r'^\d{4}$') THEN
+      SAFE_CAST(CONCAT(r4.fhir.effectiveDateTime, '-01-01 00:00:00') AS TIMESTAMP)
+  END
+)) AS observation_DATE,
+
+DATETIME(COALESCE(
+  -- 1) Direct ISO 8601 / RFC3339 style with Z or offset
+  SAFE_CAST(r4.fhir.effectiveDateTime AS TIMESTAMP),
+
+  -- 2) JS Date-style string:
+  --    "Tue Jan 11 2022 00:00:00 GMT-0700 (Mountain Standard Time)"
+  SAFE.PARSE_TIMESTAMP(
+    '%a %b %d %Y %H:%M:%S GMT%z',
+    REGEXP_EXTRACT(
+      r4.fhir.effectiveDateTime,
+      r'^[A-Za-z]{3} [A-Za-z]{3} \d{1,2} \d{4} \d{2}:\d{2}:\d{2} GMT[+-]\d{4}'
+    )
+  ),
+
+  -- 3) Year-month only: "2023-06" → "2023-06-01 00:00:00"
+  CASE
+    WHEN REGEXP_CONTAINS(r4.fhir.effectiveDateTime, r'^\d{4}-\d{2}$') THEN
+      SAFE_CAST(CONCAT(r4.fhir.effectiveDateTime, '-01 00:00:00') AS TIMESTAMP)
+  END,
+
+  -- 4) Year only: "2023" → "2023-01-01 00:00:00"
+  CASE
+    WHEN REGEXP_CONTAINS(r4.fhir.effectiveDateTime, r'^\d{4}$') THEN
+      SAFE_CAST(CONCAT(r4.fhir.effectiveDateTime, '-01-01 00:00:00') AS TIMESTAMP)
+  END
+)) AS observation_DATETIME,
+
+
+32817 AS observation_type_concept_id,
+
+INT64(NULL) AS value_as_number,
+
+r4.fhir.valueString AS value_as_string,
+
+r4.valueCodeableConcept_selected_code AS value_as_code,
+
+valueCod_om.concept_id AS value_as_concept_id,
+
+0 AS qualifier_concept_id,
+
+0 AS unit_concept_id,
+
+NULL AS provider_id,
+
+vo.visit_occurrence_id AS visit_occurrence_id,
+NULL AS visit_detail_id,
+
+norm.mapping_id AS observation_source_value,
+
+COALESCE(map_om.concept_id, 0) AS observation_source_concept_id,
+
+norm.mapping_id AS observation_source_code,
+
+STRING(NULL) AS unit_source_value,
+
+STRING(NULL) AS qualifier_source_value,
+
+COALESCE(
+  norm.valueString,
+  norm.valueDateTime,
+  r4.fhir.valueString,
+  r4.fhir.valueDateTime,
+  r4.fhir.valueTime,
+  r4.valueCodeableConcept_selected_code
+) AS value_source_value,
+
+NULL AS observation_event_id,
+
+0 AS obs_event_field_concept_id
+
+FROM norm LEFT JOIN ${ref("OBS_VOCAB")} map_om ON norm.mapping_id = map_om.concept_code
+
+LEFT JOIN r4 ON norm.medicalResource.id = r4.id
+LEFT JOIN ${ref("OBS_VOCAB")} valueCod_om ON r4.valueCodeableConcept_selected_code = valueCod_om.concept_code
+LEFT JOIN ${ref("person")} p ON norm.user.id = p.person_source_value
+LEFT JOIN ${ref("visit_occurrence")} vo ON r4.fhir.encounter.reference = vo.fhir_record_id
+)
+
+
+SELECT DISTINCT * FROM intermediate

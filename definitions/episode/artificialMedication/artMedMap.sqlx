@@ -1,0 +1,15 @@
+config {
+    type: "table"
+}
+
+SELECT
+  s.* EXCEPT(drug_concept_id),
+  c.concept_id AS drug_concept_id,
+  c.concept_name AS drug_name
+FROM ${ref("artMed")} s
+LEFT JOIN `healthtree-production.OMOP.Concept` c
+  ON
+c.concept_code = s.drug_source_value
+
+AND c.domain_id = 'Drug'
+AND c.vocabulary_id = "RxNorm"

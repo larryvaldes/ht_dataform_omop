@@ -1,0 +1,55 @@
+config {
+    type: "table"
+}
+
+WITH ao AS (
+  SELECT
+    -- Asumo que estos campos existen en artOutcome por cómo lo construiste
+    userId,
+    lineOfTherapyId,
+    numberOfLine,
+    outcome_source_text,
+    CAST(COALESCE(concept_id, 0) AS INT64) AS outcome_value_concept_id,
+    startDate,
+    endDate
+  FROM ${ref("artOutcome")}
+)
+
+SELECT
+  -- observation_id determinístico (útil para staging). Si luego quieres secuencial, lo cambiamos.
+  ABS(FARM_FINGERPRINT(CONCAT(
+    ao.userId, '|',
+    ao.lineOfTherapyId, '|',
+    CAST(COALESCE(ao.endDate, ao.startDate) AS STRING), '|',
+    CAST(ao.outcome_value_concept_id AS STRING)
+  ))) AS observation_id,
+
+  p.person_id,
+
+  36305408 AS observation_concept_id,
+
+  DATE(COALESCE(ao.endDate, ao.startDate)) AS observation_date,
+  COALESCE(ao.endDate, ao.startDate) AS observation_datetime,
+
+  32817 AS observation_type_concept_id,
+
+  CAST(NULL AS NUMERIC) AS value_as_number,
+  CAST(NULL AS STRING)  AS value_as_string,
+  ao.outcome_value_concept_id AS value_as_concept_id,
+
+  0 AS qualifier_concept_id,
+  0 AS unit_concept_id,
+
+  CAST(NULL AS INT64) AS provider_id,
+  CAST(NULL AS INT64) AS visit_occurrence_id,
+  CAST(NULL AS INT64) AS visit_detail_id,
+
+  ao.outcome_source_text AS observation_source_value,
+  0 AS observation_source_concept_id,
+  CAST(NULL AS STRING) AS unit_source_value,
+  CAST(NULL AS STRING) AS qualifier_source_value,
+  ao.outcome_source_text AS value_source_value
+
+FROM ao
+LEFT JOIN ${ref("person")} p
+  ON p.person_source_value = ao.userId

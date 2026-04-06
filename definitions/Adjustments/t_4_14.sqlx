@@ -6,7 +6,7 @@ SELECT
 19641006 AS observation_concept_id,
 
 * EXCEPT(observation_concept_id)
-FROM ${ref("observation_semi")}
+FROM ${ref("norm_observation")}
 WHERE
   LOWER(TRIM(REGEXP_EXTRACT(TRIM(observation_source_code), r'([^/]+)$')))
   IN (

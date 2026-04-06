@@ -1,0 +1,78 @@
+config {
+    type: "table"
+}
+
+-- Staging "procedure_occurrence candidates" desde linesOfTherapy
+
+WITH exploded AS (
+  SELECT
+    t.id AS lot_row_id,
+    t.lineOfTherapyId,
+    t.userId,
+    t.diseaseId,
+    t.diseaseName,
+
+    -- Flags útiles para QA / filtros
+    t.validated,
+    t.aINeedsValidation,
+    t.isClinicalRecord,
+    t.isClinicalTrial,
+
+    -- Fechas de la línea para fallback
+    t.startDate AS lot_start_datetime,
+    t.endDate   AS lot_end_datetime,
+
+    -- Procedure (del array)
+    p.snomedCode AS procedure_source_value_snomed,  -- SNOMED como source_value
+    p.name       AS procedure_name,
+    p.date       AS procedure_datetime_raw,
+
+    -- Fallback: si no hay fecha del procedure, usa la fecha de la línea
+    COALESCE(p.date, t.startDate) AS procedure_datetime,
+    DATE(COALESCE(p.date, t.startDate)) AS procedure_date
+  FROM `healthtree-production.ANISH.linesOfTherapy` t
+  CROSS JOIN UNNEST(t.listOfProcedures) AS p
+),
+
+dedup AS (
+  -- Quita duplicados típicos (mismo SNOMED + misma fecha efectiva dentro de una misma línea)
+  SELECT
+    *,
+    ROW_NUMBER() OVER (
+      PARTITION BY userId, lineOfTherapyId, procedure_source_value_snomed, procedure_datetime
+      ORDER BY
+        -- prioriza el que sí traía fecha real del procedure
+        CASE WHEN procedure_datetime_raw IS NULL THEN 2 ELSE 1 END,
+        procedure_name
+    ) AS rn
+  FROM exploded
+)
+
+SELECT
+  -- tracking / lineage
+  lot_row_id,
+  lineOfTherapyId,
+  userId,
+  diseaseId,
+  diseaseName,
+
+  -- procedure values
+  procedure_source_value_snomed,
+  procedure_name,
+  procedure_datetime,
+  procedure_date,
+
+  -- opcional: end_date si luego lo quieres mapear
+  DATE(lot_end_datetime) AS lot_end_date,
+
+  -- placeholders típicos OMOP (los completas luego)
+  CAST(NULL AS INT64) AS person_id,                 -- mapear userId -> person_id
+  CAST(NULL AS INT64) AS procedure_concept_id,      -- mapear SNOMED -> concept_id
+  CAST(NULL AS INT64) AS procedure_type_concept_id,
+  CAST(NULL AS INT64) AS visit_occurrence_id,
+  CAST(NULL AS INT64) AS visit_detail_id,
+  CAST(NULL AS STRING) AS modifier_source_value
+
+FROM dedup
+WHERE rn = 1
+  AND procedure_source_value_snomed IS NOT NULL

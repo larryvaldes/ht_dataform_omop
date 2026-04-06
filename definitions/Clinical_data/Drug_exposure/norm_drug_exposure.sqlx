@@ -4,16 +4,20 @@ config {
 
 WITH norm AS (
   SELECT
-  n.* EXCEPT(conditionMappings),
-    cm.id AS mapping_id
-  FROM `healthtree-production.HT_test_sync.apps-curehub-medicalResources-normalizations-Condition` n,
-       UNNEST(n.conditionMappings) cm
+  n.* EXCEPT(medicationMappings, contained),
+    ARRAY(
+      SELECT AS STRUCT c.* EXCEPT(text)
+      FROM UNNEST(n.contained) AS c
+    ) AS contained,
+    mm.id AS mapping_id
+  FROM `healthtree-production.HT_test_sync.apps-curehub-medicalResources-normalizations-MedicationRequest` n,
+       UNNEST(n.medicationMappings) mm
        WHERE 
-    --    (n.migratedFromRailsHealthtree = false OR n.migratedFromRailsHealthtree IS NULL) AND
+       (n.migratedFromRailsHealthtree = false OR n.migratedFromRailsHealthtree IS NULL) AND
 (n.success = true) AND
 (n.useInLogicDisallowed = false OR n.useInLogicDisallowed IS NULL) AND
 n.user.id IN (SELECT ap.person_source_value FROM ${ref("allPersons")} ap)
-AND (sourceName IS NULL OR sourceName != "HEALTH_TREE_AI" OR (validated AND isCorrect))
+-- AND (sourceName IS NULL OR sourceName != "HEALTH_TREE_AI" OR (validated AND isCorrect))
 ),
 
 map_cm AS (
@@ -35,11 +39,12 @@ AND
 id IN (SELECT DISTINCT medicalResource.id FROM norm)
 AND
 (source.name IS NULL OR source.name != 'HEALTH_TREE_AI')
-),
+)
 
 --norm records: 44,680
 --r4 records: 40,631
 
+/*
 intermediate AS (
 
 SELECT
@@ -106,5 +111,5 @@ LEFT JOIN r4 ON norm.medicalResource.id = r4.id
 LEFT JOIN ${ref("person")} p ON norm.user.id = p.person_source_value
 LEFT JOIN ${ref("visit_occurrence")} vo ON r4.fhir.encounter.reference = vo.fhir_record_id
 )
-
-SELECT DISTINCT * FROM intermediate
+*/
+SELECT DISTINCT * FROM norm

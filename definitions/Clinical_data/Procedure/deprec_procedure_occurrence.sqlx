@@ -1,18 +1,18 @@
 config {
-  type: "view"
+  type: "table"
 }
 
 -- 1) Tabla base
 WITH base AS (
   SELECT *
-  FROM ${ref("condition_occurrence_semi")}   -- ⇐ ajusta si no usas ref()
+  FROM ${ref("procedure_occurrence_semi")}   -- ⇐ ajusta si no usas ref()
 ),
 
 -- 2) Marca por par (persona, registro fuente) si existe algún mapeo ≠ 0
 flagged AS (
   SELECT
     b.*,
-    MAX( IF(COALESCE(b.condition_concept_id, 0) != 0, 1, 0) )
+    MAX( IF(COALESCE(b.procedure_concept_id, 0) != 0, 1, 0) )
       OVER (PARTITION BY b.person_source_value, b.record_source_id) AS has_mapped_in_pair
   FROM base b
 )
@@ -24,4 +24,4 @@ SELECT
   * EXCEPT(has_mapped_in_pair)
 FROM flagged
 WHERE has_mapped_in_pair = 0
-   OR COALESCE(condition_concept_id, 0) != 0
+   OR COALESCE(procedure_concept_id, 0) != 0

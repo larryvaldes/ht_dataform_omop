@@ -2,8 +2,8 @@ config {
   type: "table"
 }
 
-WITH your_table AS(SELECT * FROM ${ref("norm_observation")}
-WHERE REGEXP_CONTAINS(LOWER(value_source_value), '(^|[^a-z])ecog([^a-z]|$)')
+WITH your_table AS(SELECT * FROM ${ref("observation_semi")}
+WHERE REGEXP_CONTAINS(LOWER(observation_source_value), '(^|[^a-z])ecog([^a-z]|$)')
 ),
 
 norm AS (
@@ -67,6 +67,9 @@ ELSE 0
 END AS value_as_concept_id,
 
 ecog_inferred AS value_as_number,
+observation_source_value AS value_source_value,
+CAST(NULL AS INT64) AS observation_event_id,
+CAST(NULL AS INT64) AS obs_event_field_concept_id,
 
   * EXCEPT(observation_concept_id, value_as_concept_id, txt, ecog_leading_digit,
   ecog_explicit_single, ecog_explicit_range_hi, ecog_heur, ecog_inferred, value_as_number)
