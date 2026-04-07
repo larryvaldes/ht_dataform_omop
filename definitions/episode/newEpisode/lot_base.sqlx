@@ -1,12 +1,23 @@
 config { type: "view" }
 
+-- Source: ANISH.linesOfTherapy (flat structure with RxCUI arrays and procedure structs)
 SELECT
-  `__key__`.name AS lineId,
-  user.name      AS userId,
-  disease.kind   AS diseaseKind,
-  disease.name   AS diseaseName,
+  id                AS lineId,          -- Firestore doc ID (primary key for this pipeline)
+  lineOfTherapyId,                      -- Secondary ID used in artMed / artOutcome fingerprints
+  userId,
+  diseaseId,
+  diseaseName,
   startDate,
   endDate,
-  bestOutcome,
-  lastOutcome
-FROM `healthtree-production.HT.linesOfTherapy`
+  outcome,
+  status,
+  ongoingLineOfTherapy,
+  validated,
+  aINeedsValidation,
+  lineHasStemCellTransplant,
+  lineHasProcedures,
+  listOfProcedures,      -- ARRAY<STRUCT<snomedCode INT64, name STRING, date TIMESTAMP>>
+  stemCellProcedureDates -- ARRAY<TIMESTAMP>
+FROM `healthtree-production.ANISH.linesOfTherapy`
+WHERE id IS NOT NULL
+  AND userId IS NOT NULL

@@ -1,101 +1,70 @@
 config { type: "view" }
 
-/* Preferimos normalizations; si no hay, usamos mappings. */
-WITH stage_order AS (
-  SELECT 'induction' AS stage, 1 AS ord UNION ALL
-  SELECT 'consolidation', 2 UNION ALL
-  SELECT 'intermediate', 3 UNION ALL
-  SELECT 'maintenance', 4
-),
+-- Cancer Surgery episodes (32939) derived from listOfProcedures in ANISH.linesOfTherapy.
+-- Each distinct procedure per LoT becomes one child episode whose episode_parent_id
+-- will be resolved to the parent LoT episode_id in episode.sqlx.
 
-raw AS (
+WITH unnested AS (
   SELECT
-    lp.lineId, lp.person_id, lp.episode_number,
-    lp.startDate, lp.endDate,
-    lp.userId, lp.diseaseKind, lp.diseaseName,
-    lpl.stage, lpl.list_type, lpl.item_kind, lpl.item_name
-  FROM ${ref("lot_with_person_and_number")} lp
-  JOIN ${ref("lot_plain")} lpl
-    USING (lineId, userId, diseaseKind, diseaseName, startDate, endDate)
-  WHERE item_kind IN ('Procedure','MedicationRequest')
+    lwp.lineId,
+    lwp.lineOfTherapyId,
+    lwp.person_id,
+    lwp.episode_number,
+    lwp.startDate       AS lot_start,
+    lwp.endDate         AS lot_end,
+    lwp.userId,
+    lwp.diseaseId,
+    lwp.diseaseName,
+    p.snomedCode,
+    p.name  AS procedure_name,
+    p.date  AS procedure_date_raw
+  FROM ${ref("lot_with_person_and_number")} lwp
+  CROSS JOIN UNNEST(lwp.listOfProcedures) AS p
+  WHERE p.snomedCode IS NOT NULL
 ),
 
-/* De-dup: prioriza normalizations; ordena por stage. */
-dedup AS (
-  SELECT
-    r.*,
-    ROW_NUMBER() OVER (
-      PARTITION BY lineId, item_kind, item_name
-      ORDER BY CASE list_type WHEN 'normalizations' THEN 1 ELSE 2 END,
-               (SELECT ord FROM stage_order s WHERE s.stage = r.stage)
-    ) AS rk
-  FROM raw r
-),
-picked AS (
-  SELECT * FROM dedup WHERE rk = 1
-),
-
-/* Extrae el code STRING (no INT) para hacer JOIN a concept. 
-   Soporta formatos: "sctid:12345", "SNOMED=12345", "hemonc-ABC123", o solo "12345". */
-codes AS (
-  SELECT
-    p.*,
-    CASE
-      WHEN item_kind = 'Procedure' THEN
-        COALESCE(
-          REGEXP_EXTRACT(p.item_name, r'(?i)(?:sctid|snomed|code)\s*[:=]\s*([A-Za-z0-9._-]+)'),
-          REGEXP_EXTRACT(p.item_name, r'([A-Za-z0-9._-]{3,})')
-        )
-      ELSE /* MedicationRequest */
-        COALESCE(
-          REGEXP_EXTRACT(p.item_name, r'(?i)(?:hemonc|code)\s*[:=]\s*([A-Za-z0-9._-]+)'),
-          REGEXP_EXTRACT(p.item_name, r'([A-Za-z0-9._-]{3,})')
-        )
-    END AS code_str,
-    CASE
-      WHEN item_kind = 'Procedure'         THEN 'SNOMED'
-      WHEN item_kind = 'MedicationRequest' THEN 'HemOnc'
-    END AS voc
-  FROM picked p
-),
-
-/* Mapea code_str + vocabulary_id → concept_id OMOP (INT64 válido). */
+-- Map SNOMED codes to standard OMOP concept_ids
 mapped AS (
   SELECT
-    c.lineId, c.person_id, c.episode_number,
-    c.startDate, c.endDate, c.userId, c.diseaseKind, c.diseaseName,
-    c.stage, c.list_type, c.item_kind, c.item_name, c.code_str, c.voc,
+    u.*,
+    COALESCE(c.concept_id, 0) AS episode_object_concept_id
+  FROM unnested u
+  LEFT JOIN ${ref("concept")} c
+    ON  c.vocabulary_id     = 'SNOMED'
+    AND c.domain_id         IN ('Procedure', 'Device')
+    AND c.standard_concept  = 'S'
+    AND c.invalid_reason    IS NULL
+    AND c.concept_code      = CAST(u.snomedCode AS STRING)
+),
 
-    /* Convención de episode_concept_id por tipo */
-    CASE
-      WHEN c.item_kind = 'Procedure'         THEN 32939  -- stem cell transplant
-      WHEN c.item_kind = 'MedicationRequest' THEN 32531  -- treatment regimen
-    END AS episode_concept_id,
-
-    /* OMOP concept_id del objeto (JOIN por code_str/voc). */
-    cc.concept_id AS episode_object_concept_id
-  FROM codes c
-  LEFT JOIN ${ref("concept")} cc
-    ON cc.vocabulary_id = c.voc
-   AND cc.concept_code  = c.code_str
-   AND cc.invalid_reason IS NULL
+-- Keep one record per (lineId, snomedCode): prefer entries that have an explicit date
+deduped AS (
+  SELECT
+    *,
+    ROW_NUMBER() OVER (
+      PARTITION BY lineId, snomedCode
+      ORDER BY
+        CASE WHEN procedure_date_raw IS NOT NULL THEN 0 ELSE 1 END,
+        procedure_date_raw
+    ) AS rk
+  FROM mapped
 )
 
 SELECT
   lineId,
+  lineOfTherapyId,
   person_id,
-  /* MUY IMPORTANTE: los hijos heredan el episode_number de la LÍNEA. No renumeramos. */
   episode_number,
-
-  episode_concept_id,
+  32939                                                     AS episode_concept_id,  -- Cancer Surgery
   episode_object_concept_id,
-
-  DATE(startDate) AS episode_start_date,
-  startDate       AS episode_start_datetime,
-  DATE(endDate)   AS episode_end_date,
-  endDate         AS episode_end_datetime,
-
-  userId, diseaseKind, diseaseName,
-  stage, list_type, item_kind, item_name,
-  code_str, voc
-FROM mapped
+  DATE(COALESCE(procedure_date_raw, lot_start))             AS episode_start_date,
+  COALESCE(procedure_date_raw, lot_start)                   AS episode_start_datetime,
+  DATE(lot_end)                                             AS episode_end_date,
+  lot_end                                                   AS episode_end_datetime,
+  userId,
+  diseaseId,
+  diseaseName,
+  procedure_name                                            AS item_name,
+  CAST(snomedCode AS STRING)                                AS item_code
+FROM deduped
+WHERE rk = 1
