@@ -1,9 +1,10 @@
 config { type: "view" }
 
 -- Source: ANISH.linesOfTherapy (flat structure with RxCUI arrays and procedure structs)
+-- NOTE: id (Firestore doc ID) is NULL for 99.7% of records; lineOfTherapyId is the reliable PK.
 SELECT
-  id                AS lineId,          -- Firestore doc ID (primary key for this pipeline)
-  lineOfTherapyId,                      -- Secondary ID used in artMed / artOutcome fingerprints
+  lineOfTherapyId   AS lineId,          -- Primary key: unique, non-null across all 5168 records
+  lineOfTherapyId,                      -- Also kept as-is for artMed / artOutcome fingerprint joins
   userId,
   diseaseId,
   diseaseName,
@@ -19,5 +20,5 @@ SELECT
   listOfProcedures,      -- ARRAY<STRUCT<snomedCode INT64, name STRING, date TIMESTAMP>>
   stemCellProcedureDates -- ARRAY<TIMESTAMP>
 FROM `healthtree-production.ANISH.linesOfTherapy`
-WHERE id IS NOT NULL
+WHERE lineOfTherapyId IS NOT NULL
   AND userId IS NOT NULL
