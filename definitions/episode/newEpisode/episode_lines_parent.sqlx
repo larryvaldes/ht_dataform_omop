@@ -18,10 +18,11 @@ SELECT
   32941                                       AS episode_concept_id,       -- Cancer Drug Treatment
   CAST(NULL AS INT64)                         AS episode_parent_id,
   COALESCE(dm.disease_snomed, 437233)         AS episode_object_concept_id,
-  DATE(startDate)                             AS episode_start_date,
-  startDate                                   AS episode_start_datetime,
-  DATE(endDate)                               AS episode_end_date,
-  endDate                                     AS episode_end_datetime,
+  DATE(startDate)                                                         AS episode_start_date,
+  startDate                                                               AS episode_start_datetime,
+  -- Nullify end date when it precedes start (bad source data, not a timezone issue)
+  DATE(CASE WHEN endDate < startDate THEN NULL ELSE endDate END)          AS episode_end_date,
+  CASE WHEN endDate < startDate THEN NULL ELSE endDate END                AS episode_end_datetime,
   userId,
   diseaseId,
   diseaseName

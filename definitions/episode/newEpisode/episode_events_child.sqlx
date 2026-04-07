@@ -59,8 +59,9 @@ SELECT
   episode_object_concept_id,
   DATE(COALESCE(procedure_date_raw, lot_start))             AS episode_start_date,
   COALESCE(procedure_date_raw, lot_start)                   AS episode_start_datetime,
-  DATE(lot_end)                                             AS episode_end_date,
-  lot_end                                                   AS episode_end_datetime,
+  -- Nullify end date when lot_end precedes the episode start (mirrors episode_lines_parent guard)
+  DATE(CASE WHEN lot_end < COALESCE(procedure_date_raw, lot_start) THEN NULL ELSE lot_end END) AS episode_end_date,
+  CASE WHEN lot_end < COALESCE(procedure_date_raw, lot_start) THEN NULL ELSE lot_end END       AS episode_end_datetime,
   userId,
   diseaseId,
   diseaseName,
