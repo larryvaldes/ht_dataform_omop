@@ -51,7 +51,10 @@ surgery_raw AS (
   WHERE person_id IS NOT NULL
 ),
 
--- ── 3. Disease Episode (one per patient, earliest MM dx) ─────
+-- ── 3. Disease Episode (one per patient per disease) ─────────
+-- Covers all 6 HealthTree disease types. MM variants (4047185, 4176952)
+-- are normalised to the canonical MM concept (437233) so each patient
+-- gets at most one MM Disease episode. GROUP BY on the normalised concept.
 disease_episodes AS (
   SELECT
     'DIS'                          AS rec_type,
@@ -61,7 +64,10 @@ disease_episodes AS (
     CAST(NULL AS INT64)            AS episode_number,
     32533                          AS episode_concept_id,
     CAST(NULL AS INT64)            AS episode_parent_id,   -- top-level, no parent
-    437233                         AS episode_object_concept_id,  -- Multiple Myeloma (SNOMED)
+    CASE
+      WHEN co.condition_concept_id IN (437233, 4047185, 4176952) THEN 437233  -- MM
+      ELSE co.condition_concept_id
+    END                            AS episode_object_concept_id,
     MIN(co.condition_start_date)   AS episode_start_date,
     MIN(CAST(co.condition_start_datetime AS TIMESTAMP)) AS episode_start_datetime,
     CAST(NULL AS DATE)             AS episode_end_date,
@@ -70,9 +76,19 @@ disease_episodes AS (
   WHERE co.condition_concept_id IN (
     437233,   -- Multiple myeloma
     4047185,  -- Plasma cell myeloma
-    4176952   -- Symptomatic myeloma
+    4176952,  -- Symptomatic myeloma
+    140352,   -- MDS
+    4147411,  -- AML
+    133169,   -- CML
+    138994,   -- NHL
+    432574    -- CLL
   )
-  GROUP BY co.person_id
+  GROUP BY
+    co.person_id,
+    CASE
+      WHEN co.condition_concept_id IN (437233, 4047185, 4176952) THEN 437233
+      ELSE co.condition_concept_id
+    END
 ),
 
 -- ── 4. Progression episodes ───────────────────────────────────
@@ -101,7 +117,7 @@ progression_episodes AS (
 -- ── ID block 1: Disease episodes (top-level anchor) ──────────
 disease_with_id AS (
   SELECT
-    ROW_NUMBER() OVER (ORDER BY person_id) AS episode_id,
+    ROW_NUMBER() OVER (ORDER BY person_id, episode_object_concept_id) AS episode_id,
     d.*
   FROM disease_episodes d
 ),
@@ -118,7 +134,9 @@ lot_with_id AS (
         ) AS episode_id,
     l.* REPLACE (dw.episode_id AS episode_parent_id)
   FROM lot_episodes l
-  LEFT JOIN disease_with_id dw USING (person_id)
+  LEFT JOIN disease_with_id dw
+    ON  dw.person_id               = l.person_id
+    AND dw.episode_object_concept_id = l.episode_object_concept_id
 ),
 
 -- ── ID block 3: Surgery — parent_id → LoT episode same line ──
