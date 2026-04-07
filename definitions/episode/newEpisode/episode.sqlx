@@ -8,6 +8,9 @@ config { type: "table" }
 --  32941 – Cancer Drug Treatment 1 per Line of Therapy (LoT)
 --  32939 – Cancer Surgery        1 per procedure within a LoT
 --  32949 – Progression           1 per LoT that ended in progression
+--
+-- ID assignment order: Disease → LoT → Surgery → Progression
+-- so each child type can resolve episode_parent_id in the same pass.
 -- ============================================================
 
 -- ── 1. Cancer Drug Treatment (LoT) ──────────────────────────
@@ -19,7 +22,7 @@ WITH lot_episodes AS (
     person_id,
     episode_number,
     32941                          AS episode_concept_id,
-    CAST(NULL AS INT64)            AS episode_parent_id,
+    CAST(NULL AS INT64)            AS episode_parent_id,   -- resolved below
     episode_object_concept_id,
     episode_start_date,
     episode_start_datetime,
@@ -38,7 +41,7 @@ surgery_raw AS (
     person_id,
     episode_number,
     32939                          AS episode_concept_id,
-    CAST(NULL AS INT64)            AS episode_parent_id,  -- resolved below
+    CAST(NULL AS INT64)            AS episode_parent_id,   -- resolved below
     episode_object_concept_id,
     episode_start_date,
     episode_start_datetime,
@@ -55,26 +58,25 @@ disease_episodes AS (
     CAST(NULL AS STRING)           AS lineId,
     CAST(NULL AS STRING)           AS lineOfTherapyId,
     co.person_id,
-    -- Disease episodes sit outside any LoT; episode_number not applicable
     CAST(NULL AS INT64)            AS episode_number,
     32533                          AS episode_concept_id,
-    CAST(NULL AS INT64)            AS episode_parent_id,
+    CAST(NULL AS INT64)            AS episode_parent_id,   -- top-level, no parent
     437233                         AS episode_object_concept_id,  -- Multiple Myeloma (SNOMED)
     MIN(co.condition_start_date)   AS episode_start_date,
     MIN(CAST(co.condition_start_datetime AS TIMESTAMP)) AS episode_start_datetime,
     CAST(NULL AS DATE)             AS episode_end_date,
     CAST(NULL AS TIMESTAMP)        AS episode_end_datetime
   FROM ${ref("condition_occurrence")} co
-  -- Include MM and closely related plasma cell neoplasm concepts
   WHERE co.condition_concept_id IN (
     437233,   -- Multiple myeloma
     4047185,  -- Plasma cell myeloma
-    4176952   -- Symptomatic myeloma (if present)
+    4176952   -- Symptomatic myeloma
   )
   GROUP BY co.person_id
 ),
 
--- ── 4. Progression episodes (LoT with progression outcome) ───
+-- ── 4. Progression episodes ───────────────────────────────────
+-- outcome_source_text values in ANISH are SNAKE_CASE enums.
 progression_episodes AS (
   SELECT
     'PGR'                          AS rec_type,
@@ -82,47 +84,46 @@ progression_episodes AS (
     ao.lineOfTherapyId,
     p.person_id,
     CAST(NULL AS INT64)            AS episode_number,
-    32949                          AS episode_concept_id,  -- Progression
+    32949                          AS episode_concept_id,
     CAST(NULL AS INT64)            AS episode_parent_id,   -- resolved below
     437233                         AS episode_object_concept_id,  -- MM
-    DATE(COALESCE(ao.endDate, ao.startDate))      AS episode_start_date,
-    COALESCE(ao.endDate, ao.startDate)            AS episode_start_datetime,
+    DATE(COALESCE(ao.endDate, ao.startDate))   AS episode_start_date,
+    COALESCE(ao.endDate, ao.startDate)         AS episode_start_datetime,
     CAST(NULL AS DATE)             AS episode_end_date,
     CAST(NULL AS TIMESTAMP)        AS episode_end_datetime
   FROM ${ref("artOutcome")} ao
   JOIN ${ref("person")} p
     ON p.person_source_value = ao.userId
-  WHERE REGEXP_CONTAINS(
-    LOWER(COALESCE(ao.outcome_source_text, '')),
-    r'\b(pd|progress(?:ion|ive)?|relaps(?:e|ed)?|refract(?:ory)?)\b'
-  )
+  WHERE UPPER(TRIM(COALESCE(ao.outcome_source_text, '')))
+          IN ('PROGRESSIVE_DISEASE', 'PROGRESSIVE DISEASE')
 ),
 
--- ── Assign IDs to LoT parents first (anchor for FK resolution) ─
-lot_with_id AS (
-  SELECT
-    ROW_NUMBER() OVER (
-      ORDER BY COALESCE(person_id, -1), episode_number, lineId
-    ) AS episode_id,
-    l.*
-  FROM lot_episodes l
-),
-
--- ── Assign IDs to Disease episodes (block after LoT) ──────────
-disease_offset AS (
-  SELECT COALESCE(MAX(episode_id), 0) AS mx FROM lot_with_id
-),
+-- ── ID block 1: Disease episodes (top-level anchor) ──────────
 disease_with_id AS (
   SELECT
-    (SELECT mx FROM disease_offset)
-      + ROW_NUMBER() OVER (ORDER BY person_id) AS episode_id,
+    ROW_NUMBER() OVER (ORDER BY person_id) AS episode_id,
     d.*
   FROM disease_episodes d
 ),
 
--- ── Surgery: resolve parent_id to its LoT episode_id ──────────
-surgery_offset AS (
+-- ── ID block 2: LoT — parent_id → Disease episode same patient ─
+lot_offset AS (
   SELECT COALESCE(MAX(episode_id), 0) AS mx FROM disease_with_id
+),
+lot_with_id AS (
+  SELECT
+    (SELECT mx FROM lot_offset)
+      + ROW_NUMBER() OVER (
+          ORDER BY COALESCE(l.person_id, -1), l.episode_number, l.lineId
+        ) AS episode_id,
+    l.* REPLACE (dw.episode_id AS episode_parent_id)
+  FROM lot_episodes l
+  LEFT JOIN disease_with_id dw USING (person_id)
+),
+
+-- ── ID block 3: Surgery — parent_id → LoT episode same line ──
+surgery_offset AS (
+  SELECT COALESCE(MAX(episode_id), 0) AS mx FROM lot_with_id
 ),
 surgery_with_id AS (
   SELECT
@@ -130,17 +131,14 @@ surgery_with_id AS (
       + ROW_NUMBER() OVER (
           ORDER BY COALESCE(sr.person_id, -1), sr.episode_number, sr.lineId
         ) AS episode_id,
-    sr.* REPLACE (
-      lw.episode_id AS episode_parent_id
-    )
+    sr.* REPLACE (lw.episode_id AS episode_parent_id)
   FROM surgery_raw sr
   LEFT JOIN lot_with_id lw
-    ON  sr.lineId   = lw.lineId
-    AND (sr.person_id = lw.person_id
-         OR (sr.person_id IS NULL AND lw.person_id IS NULL))
+    ON  sr.lineId     = lw.lineId
+    AND sr.person_id  = lw.person_id
 ),
 
--- ── Progression: resolve parent_id to its LoT episode_id ──────
+-- ── ID block 4: Progression — parent_id → LoT episode ────────
 progression_offset AS (
   SELECT COALESCE(MAX(episode_id), 0) AS mx FROM surgery_with_id
 ),
@@ -150,9 +148,7 @@ progression_with_id AS (
       + ROW_NUMBER() OVER (
           ORDER BY COALESCE(pg.person_id, -1), pg.lineId
         ) AS episode_id,
-    pg.* REPLACE (
-      lw.episode_id AS episode_parent_id
-    )
+    pg.* REPLACE (lw.episode_id AS episode_parent_id)
   FROM progression_episodes pg
   LEFT JOIN lot_with_id lw
     ON  pg.lineOfTherapyId = lw.lineOfTherapyId
@@ -176,7 +172,7 @@ FROM (
          episode_start_date, episode_start_datetime,
          episode_end_date,   episode_end_datetime,
          episode_parent_id,  episode_number, episode_object_concept_id
-  FROM lot_with_id
+  FROM disease_with_id
 
   UNION ALL
 
@@ -184,7 +180,7 @@ FROM (
          episode_start_date, episode_start_datetime,
          episode_end_date,   episode_end_datetime,
          episode_parent_id,  episode_number, episode_object_concept_id
-  FROM disease_with_id
+  FROM lot_with_id
 
   UNION ALL
 
