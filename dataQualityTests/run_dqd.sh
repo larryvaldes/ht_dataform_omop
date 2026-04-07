@@ -31,13 +31,18 @@ log() { echo "[$(date '+%H:%M:%S')] $*" | tee -a "$LOG_FILE"; }
 
 run_sql() {
   local file="$1"
-  bq query \
-    --project_id="$PROJECT" \
-    --dataset_id="$DATASET" \
-    --use_legacy_sql=false \
-    --max_rows=0 \
-    --quiet \
-    < "$file" 2>&1
+  # BigQuery types bare `null` as INT64, but the results table expects STRING for
+  # not_applicable_reason and notes_value. Fix with sed before sending to bq.
+  sed \
+    -e 's/,null as not_applicable_reason/,CAST(null AS STRING) as not_applicable_reason/g' \
+    -e 's/,null as notes_value/,CAST(null AS STRING) as notes_value/g' \
+    "$file" \
+  | bq query \
+      --project_id="$PROJECT" \
+      --dataset_id="$DATASET" \
+      --use_legacy_sql=false \
+      --max_rows=0 \
+      --quiet 2>&1
 }
 
 # ── Order: DDL first, then TABLE, FIELD, CONCEPT checks ──────────────────────
