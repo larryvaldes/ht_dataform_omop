@@ -1,0 +1,297 @@
+version: 2
+models:
+  - name: omop__observation
+    description: The OBSERVATION table captures clinical facts about a Person obtained in the context of examination, questioning or a procedure. Any data that cannot be represented by any other domains, such as social and lifestyle facts, medical history, family history, etc. are recorded here.
+    tests:
+      - person_completeness:
+          arguments:
+            threshold: '95'
+      - source_value_populated:
+          config:
+            severity: warn
+            tags: ['conformance']
+          arguments:
+            concept_column: observation_concept_id
+            source_value_column: observation_source_value
+      - value_completeness:
+          column_name: observation_id
+          arguments:
+            value_columns: ['value_as_number', 'value_as_string', 'value_as_concept_id']
+            threshold: '50'
+    columns:
+      - name: observation_id
+        description: The unique key given to an Observation record for a Person. Refer to the ETL for how duplicate Observations during the same Visit were handled.
+        data_type: integer
+        tests:
+          - unique:
+              config:
+                severity: error
+          - not_null:
+              config:
+                severity: error
+                tags: ['conformance']
+        constraints:
+          - type: primary_key
+      - name: person_id
+        description: The PERSON_ID of the Person for whom the Observation is recorded. This may be a system generated code.
+        data_type: integer
+        tests:
+          - not_null
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('omop__person')
+                field: person_id
+        constraints:
+          - type: foreign_key
+            to: ref('omop__person')
+            to_columns: [person_id]
+      - name: observation_concept_id
+        description: The OBSERVATION_CONCEPT_ID field is recommended for primary use in analyses, and must be used for network studies.
+        data_type: integer
+        tests:
+          - not_null
+          - dbt_utils.relationships_where:
+              config:
+                severity: warn
+                tags: ['conformance']
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: observation_concept_id <> 0
+                to_condition: domain_id = 'Observation'
+          - concept_zero_rate:
+              arguments:
+                threshold: '72'
+
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: observation_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: observation_date
+        description: The date of when the Observation was obtained. Depending on what the Observation represents this could be the date of a lab test, the date of a survey, or the date a patient's family history was taken.
+        data_type: date
+        tests:
+          - not_null
+          - date_not_in_future
+          - outside_observation_period
+      - name: observation_datetime
+        description: ''
+        data_type: TIMESTAMP
+      - name: observation_type_concept_id
+        description: This field can be used to determine the provenance of the Observation record, as in whether the measurement was from an EHR system, insurance claim, registry, or other sources.
+        data_type: integer
+        tests:
+          - not_null
+          - type_concept_valid:
+              config:
+                severity: error
+                tags: ['conformance']
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: observation_type_concept_id <> 0
+                to_condition: domain_id = 'Type Concept'
+          - concept_zero_rate:
+              arguments:
+                threshold: '0'
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: observation_type_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: value_as_number
+        description: This is the numerical value of the Result of the Observation, if applicable and available. It is not expected that all Observations will have numeric results, rather, this field is here to house values should they exist.
+        data_type: FLOAT64
+      - name: value_as_string
+        description: This is the categorical value of the Result of the Observation, if applicable and available.
+        data_type: STRING
+      - name: value_as_concept_id
+        description: It is possible that some records destined for the Observation table have two clinical ideas represented in one source code. This is common with ICD10 codes that describe a family history of some Condition, for example. In OMOP the Vocabulary breaks these two clinical ideas into two codes; one becomes the OBSERVATION_CONCEPT_ID and the other becomes the VALUE_AS_CONCEPT_ID. It is important when using the Observation table to keep this possibility in mind and to examine the VALUE_AS_CONCEPT_ID field for relevant information.
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: value_as_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: qualifier_concept_id
+        description: This field contains all attributes specifying the clinical fact further, such as as degrees, severities, drug-drug interaction alerts etc.
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: qualifier_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: unit_concept_id
+        description: There is currently no recommended unit for individual observation concepts. UNIT_SOURCE_VALUES should be mapped to a Standard Concept in the Unit domain that best represents the unit as given in the source data.
+        data_type: integer
+        tests:
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: unit_concept_id <> 0
+                to_condition: domain_id = 'Unit'
+          - concept_zero_rate:
+              arguments:
+                threshold: '84'
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: unit_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: provider_id
+        description: The provider associated with the observation record, e.g. the provider who ordered the test or the provider who recorded the result.
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('omop__provider')
+                field: provider_id
+          - fk_null_rate:
+              config:
+                severity: warn
+              arguments:
+                threshold: 92
+        constraints:
+          - type: foreign_key
+            to: ref('omop__provider')
+            to_columns: [provider_id]
+      - name: visit_occurrence_id
+        description: The visit during which the Observation occurred.
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('omop__visit_occurrence')
+                field: visit_occurrence_id
+          - fk_null_rate:
+              config:
+                severity: warn
+              arguments:
+                threshold: 23
+        constraints:
+          - type: foreign_key
+            to: ref('omop__visit_occurrence')
+            to_columns: [visit_occurrence_id]
+      - name: visit_detail_id
+        description: The VISIT_DETAIL record during which the Observation occurred. For example, if the Person was in the ICU at the time the VISIT_OCCURRENCE record would reflect the overall hospital stay and the VISIT_DETAIL record would reflect the ICU stay during the hospital visit.
+        data_type: integer
+        constraints:
+          - type: foreign_key
+            to: ref('omop__visit_detail')
+            to_columns: [visit_detail_id]
+      - name: observation_source_value
+        description: This field houses the verbatim value from the source data representing the Observation that occurred. For example, this could be an ICD10 or Read code.
+        data_type: STRING
+      - name: observation_source_concept_id
+        description: This is the concept representing the OBSERVATION_SOURCE_VALUE and may not necessarily be standard. This field is discouraged from use in analysis because it is not required to contain Standard Concepts that are used across the OHDSI community, and should only be used when Standard Concepts do not adequately represent the source detail for the Observation necessary for a given analytic use case. Consider using OBSERVATION_CONCEPT_ID instead to enable standardized analytics that can be consistent across the network.
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+          - concept_zero_rate:
+              arguments:
+                threshold: '72'
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: unit_source_value
+        description: This field houses the verbatim value from the source data representing the unit of the Observation that occurred.
+        data_type: STRING
+      - name: qualifier_source_value
+        description: This field houses the verbatim value from the source data representing the qualifier of the Observation that occurred.
+        data_type: STRING
+      - name: value_source_value
+        description: This field houses the verbatim result value of the Observation from the source data.  Do not get confused with the Observation_source_value which captures source value of the observation mapped to observation_concept_id. This field is the observation result value from the source.
+        data_type: STRING
+      - name: observation_event_id
+        description: If the Observation record is related to another record in the database, this field is the primary key of the linked record.
+        data_type: integer
+      - name: obs_event_field_concept_id
+        description: If the Observation record is related to another record in the database, this field is the CONCEPT_ID that identifies which table the primary key of the linked record came from.
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: obs_event_field_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]

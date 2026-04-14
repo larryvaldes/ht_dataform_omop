@@ -1,0 +1,322 @@
+version: 2
+models:
+  - name: omop__measurement
+    description: The MEASUREMENT table contains records of Measurements, i.e. structured values (numerical or categorical) obtained through systematic and standardized examination or testing of a Person or Person's sample. The MEASUREMENT table contains both orders and results of such Measurements as laboratory tests, vital signs, quantitative findings from pathology reports, etc. Measurements are stored as attribute value pairs, with the attribute as the Measurement Concept and the value representing the result. The value can be a Concept (stored in VALUE_AS_CONCEPT), or a numerical value (VALUE_AS_NUMBER) with a Unit (UNIT_CONCEPT_ID). The Procedure for obtaining the sample is housed in the PROCEDURE_OCCURRENCE table, though it is unnecessary to create a PROCEDURE_OCCURRENCE record for each measurement if one does not exist in the source data. Measurements differ from Observations in that they require a standardized test or some other activity to generate a quantitative or qualitative result. If there is no result, it is assumed that the lab test was conducted but the result was not captured.
+    tests:
+      - person_completeness:
+          arguments:
+            threshold: '95'
+      - source_value_populated:
+          config:
+            severity: warn
+            tags: ['conformance']
+          arguments:
+            concept_column: measurement_concept_id
+            source_value_column: measurement_source_value
+      - value_completeness:
+          column_name: measurement_id
+          arguments:
+            value_columns: ['value_as_number', 'value_as_concept_id']
+            threshold: '50'
+    columns:
+      - name: measurement_id
+        description: The unique key given to a Measurement record for a Person. Refer to the ETL for how duplicate Measurements during the same Visit were handled.
+        data_type: integer
+        tests:
+          - unique:
+              config:
+                severity: error
+          - not_null:
+              config:
+                severity: error
+                tags: ['conformance']
+        constraints:
+          - type: primary_key
+      - name: person_id
+        description: The PERSON_ID of the Person for whom the Measurement is recorded. This may be a system generated code.
+        data_type: integer
+        tests:
+          - not_null
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('omop__person')
+                field: person_id
+        constraints:
+          - type: foreign_key
+            to: ref('omop__person')
+            to_columns: [person_id]
+      - name: measurement_concept_id
+        description: The MEASUREMENT_CONCEPT_ID field is recommended for primary use in analyses, and must be used for network studies. This is the standard concept mapped from the source value which represents a measurement.
+        data_type: integer
+        tests:
+          - not_null
+          - domain_routing_valid:
+              config:
+                severity: error
+                tags: ['conformance']
+              arguments:
+                expected_domain: Measurement
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: measurement_concept_id <> 0
+                to_condition: domain_id = 'Measurement'
+          - concept_zero_rate:
+              arguments:
+                threshold: '11'
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: measurement_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: measurement_date
+        description: Use this date to determine the date of the measurement.
+        data_type: date
+        tests:
+          - not_null
+          - date_not_in_future
+          - outside_observation_period
+      - name: measurement_datetime
+        description: ''
+        data_type: TIMESTAMP
+      - name: measurement_time
+        description: ''
+        data_type: STRING
+      - name: measurement_type_concept_id
+        description: This field can be used to determine the provenance of the Measurement record, as in whether the measurement was from an EHR system, insurance claim, registry, or other sources.
+        data_type: integer
+        tests:
+          - not_null
+          - type_concept_valid:
+              config:
+                severity: error
+                tags: ['conformance']
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: measurement_type_concept_id <> 0
+                to_condition: domain_id = 'Type Concept'
+          - concept_zero_rate:
+              arguments:
+                threshold: '0'
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: measurement_type_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: operator_concept_id
+        description: The meaning of Concept [4172703](https://athena.ohdsi.org/search-terms/terms/4172703) for '=' is identical to omission of a OPERATOR_CONCEPT_ID value. Since the use of this field is rare, it's important when devising analyses to not to forget testing for the content of this field for values different from =.
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: operator_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: value_as_number
+        description: This is the numerical value of the Result of the Measurement, if available. Note that measurements such as blood pressures will be split into their component parts i.e. one record for systolic, one record for diastolic.
+        data_type: FLOAT64
+      - name: value_as_concept_id
+        description: If the raw data gives a categorial result for measurements those values are captured and mapped to standard concepts in the 'Meas Value' domain.
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: value_as_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: unit_concept_id
+        description: At present, there isn't a prescribed unit for individual measurements, such as Hemoglobin A1C, meaning it's not obligatory to express these measurements as a percentage. UNIT_SOURCE_VALUES should be linked to a Standard Concept within the Unit domain that most accurately reflects the unit provided in the source data.
+        data_type: integer
+        tests:
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: unit_concept_id <> 0
+                to_condition: domain_id = 'Unit'
+          - concept_zero_rate:
+              arguments:
+                threshold: '13'
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: unit_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: range_low
+        description: Ranges have the same unit as the VALUE_AS_NUMBER. These ranges are provided by the source and should remain NULL if not given.
+        data_type: FLOAT64
+      - name: range_high
+        description: Ranges have the same unit as the VALUE_AS_NUMBER. These ranges are provided by the source and should remain NULL if not given.
+        data_type: FLOAT64
+      - name: provider_id
+        description: The provider associated with measurement record, e.g. the provider who ordered the test or the provider who recorded the result.
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('omop__provider')
+                field: provider_id
+          - fk_null_rate:
+              config:
+                severity: warn
+              arguments:
+                threshold: 85
+        constraints:
+          - type: foreign_key
+            to: ref('omop__provider')
+            to_columns: [provider_id]
+      - name: visit_occurrence_id
+        description: The visit during which the Measurement occurred.
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('omop__visit_occurrence')
+                field: visit_occurrence_id
+          - fk_null_rate:
+              config:
+                severity: warn
+              arguments:
+                threshold: 31
+        constraints:
+          - type: foreign_key
+            to: ref('omop__visit_occurrence')
+            to_columns: [visit_occurrence_id]
+      - name: visit_detail_id
+        description: The VISIT_DETAIL record during which the Measurement occurred. For example, if the Person was in the ICU at the time the VISIT_OCCURRENCE record would reflect the overall hospital stay and the VISIT_DETAIL record would reflect the ICU stay during the hospital visit.
+        data_type: integer
+        constraints:
+          - type: foreign_key
+            to: ref('omop__visit_detail')
+            to_columns: [visit_detail_id]
+      - name: measurement_source_value
+        description: This field contains the exact value from the source data that represents the measurement that occurred.
+        data_type: STRING
+      - name: measurement_source_concept_id
+        description: This is the concept representing the MEASUREMENT_SOURCE_VALUE and may not necessarily be standard. This field is discouraged from use in analysis because it is not required to contain Standard Concepts that are used across the OHDSI community, and should only be used when Standard Concepts do not adequately represent the source detail for the Measurement necessary for a given analytic use case. Consider using MEASUREMENT_CONCEPT_ID instead to enable standardized analytics that can be consistent across the network.
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+          - concept_zero_rate:
+              arguments:
+                threshold: '12'
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: unit_source_value
+        description: This field contains the exact value from the source data that represents the unit of measurement used.
+        data_type: STRING
+      - name: unit_source_concept_id
+        description: '"This is the concept representing the UNIT_SOURCE_VALUE and may not necessarily be standard. This field is discouraged from use in analysis because it is not required to contain Standard Concepts that are used across the OHDSI community, and should only be used when Standard Concepts do not adequately represent the source detail for the Measurement necessary for a given analytic use case. Consider using UNIT_CONCEPT_ID instead to enable standardized analytics that can be consistent across the network."'
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+          - concept_zero_rate:
+              # 100% unmapped expected: unit source concepts have no standard mapping currently
+              arguments:
+                threshold: '100'
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: value_source_value
+        description: This field houses the verbatim result value of the Measurement from the source data .
+        data_type: STRING
+      - name: measurement_event_id
+        description: If the Measurement record is related to another record in the database, this field is the primary key of the linked record.
+        data_type: integer
+      - name: meas_event_field_concept_id
+        description: If the Measurement record is related to another record in the database, this field is the CONCEPT_ID that identifies which table the primary key of the linked record came from.
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: meas_event_field_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]

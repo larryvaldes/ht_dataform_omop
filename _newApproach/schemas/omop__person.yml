@@ -1,0 +1,238 @@
+version: 2
+models:
+  - name: omop__person
+    description: This table serves as the central identity management for all Persons in the database. It contains records that uniquely identify each person or patient, and some demographic information.
+    columns:
+      - name: person_id
+        description: It is assumed that every person with a different unique identifier is in fact a different person and should be treated independently.
+        data_type: integer
+        tests:
+          - unique:
+              config:
+                severity: error
+          - not_null:
+              config:
+                severity: error
+                tags: ['conformance']
+        constraints:
+          - type: primary_key
+      - name: gender_concept_id
+        description: This field is meant to capture the biological sex at birth of the Person. This field should not be used to study gender identity issues.
+        data_type: integer
+        tests:
+          - not_null
+          - accepted_values:
+              config:
+                tags: ['conformance']
+              arguments:
+                values: [8507, 8532, 8551, 44814653, 0]
+                quote: false
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: gender_concept_id <> 0
+                to_condition: domain_id = 'Gender'
+          - concept_zero_rate:
+              arguments:
+                threshold: '5'
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: gender_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: year_of_birth
+        description: Compute age using year_of_birth.
+        data_type: integer
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1900
+                max_value: 2026
+      - name: month_of_birth
+        description: ''
+        data_type: integer
+      - name: day_of_birth
+        description: ''
+        data_type: integer
+      - name: birth_datetime
+        description: ''
+        data_type: TIMESTAMP
+      - name: race_concept_id
+        description: This field captures race or ethnic background of the person.
+        data_type: integer
+        tests:
+          - not_null
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: race_concept_id <> 0
+                to_condition: domain_id = 'Race'
+          - concept_zero_rate:
+              arguments:
+                threshold: '8'
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: race_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: ethnicity_concept_id
+        description: 'This field captures Ethnicity as defined by the Office of Management and Budget (OMB) of the US Government: it distinguishes only between "Hispanic" and "Not Hispanic". Races and ethnic backgrounds are not stored here.'
+        data_type: integer
+        tests:
+          - not_null
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: ethnicity_concept_id <> 0
+                to_condition: domain_id = 'Ethnicity'
+          - concept_zero_rate:
+              arguments:
+                threshold: '8'
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: ethnicity_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: location_id
+        description: The location refers to the physical address of the person. This field should capture the last known location of the person.
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('omop__location')
+                field: location_id
+          - fk_null_rate:
+              config:
+                severity: warn
+              arguments:
+                threshold: 1
+        constraints:
+          - type: foreign_key
+            to: ref('omop__location')
+            to_columns: [location_id]
+      - name: provider_id
+        description: The Provider refers to the last known primary care provider (General Practitioner).
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('omop__provider')
+                field: provider_id
+          # Intentionally permissive: most self-reported patients have no linked provider
+          - fk_null_rate:
+              config:
+                severity: warn
+              arguments:
+                threshold: 100
+        constraints:
+          - type: foreign_key
+            to: ref('omop__provider')
+            to_columns: [provider_id]
+      - name: care_site_id
+        description: The Care Site refers to where the Provider typically provides the primary care.
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('omop__care_site')
+                field: care_site_id
+          - fk_null_rate:
+              config:
+                severity: warn
+              arguments:
+                threshold: 16
+        constraints:
+          - type: foreign_key
+            to: ref('omop__care_site')
+            to_columns: [care_site_id]
+      - name: person_source_value
+        description: Use this field to link back to persons in the source data. This is typically used for error checking of ETL logic.
+        data_type: STRING
+      - name: gender_source_value
+        description: This field is used to store the biological sex of the person from the source data. It is not intended for use in standard analytics but for reference only.
+        data_type: STRING
+      - name: gender_source_concept_id
+        description: Due to the small number of options, this tends to be zero.
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: race_source_value
+        description: This field is used to store the race of the person from the source data. It is not intended for use in standard analytics but for reference only.
+        data_type: STRING
+      - name: race_source_concept_id
+        description: Due to the small number of options, this tends to be zero.
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: ethnicity_source_value
+        description: This field is used to store the ethnicity of the person from the source data. It is not intended for use in standard analytics but for reference only.
+        data_type: STRING
+      - name: ethnicity_source_concept_id
+        description: Due to the small number of options, this tends to be zero.
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]

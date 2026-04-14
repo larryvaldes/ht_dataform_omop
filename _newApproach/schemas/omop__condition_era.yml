@@ -1,0 +1,82 @@
+version: 2
+models:
+  - name: omop__condition_era
+    description: "A Condition Era is defined as a span of time when the Person is assumed to have a given condition. Similar to Drug Eras, Condition Eras are chronological periods of Condition Occurrence and every Condition Occurrence record should be part of a Condition Era. Combining individual Condition Occurrences into a single Condition Era serves two purposes:  - It allows aggregation of chronic conditions that require frequent ongoing care, instead of treating each Condition Occurrence as an independent event. - It allows aggregation of multiple, closely timed doctor visits for the same Condition to avoid double-counting the Condition Occurrences. For example, consider a Person who visits her Primary Care Physician (PCP) and who is referred to a specialist. At a later time, the Person visits the specialist, who confirms the PCP's original diagnosis and provides the appropriate treatment to resolve the condition. These two independent doctor visits should be aggregated into one Condition Era."
+    tests:
+      - person_completeness:
+          arguments:
+            threshold: '95'
+    columns:
+      - name: condition_era_id
+        description: ''
+        data_type: integer
+        tests:
+          - unique:
+              config:
+                severity: error
+          - not_null:
+              config:
+                severity: error
+                tags: ['conformance']
+        constraints:
+          - type: primary_key
+      - name: person_id
+        description: ''
+        data_type: integer
+        tests:
+          - not_null
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('omop__person')
+                field: person_id
+        constraints:
+          - type: foreign_key
+            to: ref('omop__person')
+            to_columns: [person_id]
+      - name: condition_concept_id
+        description: The Concept Id representing the Condition.
+        data_type: integer
+        tests:
+          - not_null
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: condition_concept_id <> 0
+                to_condition: domain_id = 'Condition'
+          - concept_zero_rate:
+              arguments:
+                threshold: '0'
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: condition_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: condition_era_start_date
+        description: The start date for the Condition Era constructed from the individual instances of Condition Occurrences. It is the start date of the very first chronologically recorded instance of the condition with at least 31 days since any prior record of the same Condition.
+        data_type: date
+        tests:
+          - not_null
+          - date_not_after:
+              arguments:
+                after_column: condition_era_end_date
+          - outside_observation_period
+      - name: condition_era_end_date
+        description: The end date for the Condition Era constructed from the individual instances of Condition Occurrences. It is the end date of the final continuously recorded instance of the Condition.
+        data_type: date
+        tests:
+          - not_null
+      - name: condition_occurrence_count
+        description: The number of individual Condition Occurrences used to construct the condition era.
+        data_type: integer

@@ -1,0 +1,226 @@
+version: 2
+models:
+  - name: omop__condition_occurrence
+    description: This table contains records of Events of a Person suggesting the presence of a disease or medical condition stated as a diagnosis, a sign, or a symptom, which is either observed by a Provider or reported by the patient.
+    tests:
+      - person_completeness:
+          arguments:
+            threshold: '95'
+    columns:
+      - name: condition_occurrence_id
+        description: The unique key given to a condition record for a person. Refer to the ETL for how duplicate conditions during the same visit were handled.
+        data_type: integer
+        tests:
+          - unique:
+              config:
+                severity: error
+          - not_null:
+              config:
+                severity: error
+                tags: ['conformance']
+        constraints:
+          - type: primary_key
+      - name: person_id
+        description: The PERSON_ID of the PERSON for whom the condition is recorded.
+        data_type: integer
+        tests:
+          - not_null
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('omop__person')
+                field: person_id
+        constraints:
+          - type: foreign_key
+            to: ref('omop__person')
+            to_columns: [person_id]
+      - name: condition_concept_id
+        description: The CONDITION_CONCEPT_ID field is recommended for primary use in analyses, and must be used for network studies. This is the standard concept mapped from the source value which represents a condition
+        data_type: integer
+        tests:
+          - not_null
+          - domain_routing_valid:
+              config:
+                severity: error
+                tags: ['conformance']
+              arguments:
+                expected_domain: Condition
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: condition_concept_id <> 0
+                to_condition: domain_id = 'Condition'
+          - concept_zero_rate:
+              arguments:
+                threshold: '5'
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: condition_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: condition_start_date
+        description: Use this date to determine the start date of the condition
+        data_type: date
+        tests:
+          - not_null
+          - date_not_in_future
+          - date_not_after:
+              arguments:
+                after_column: condition_end_date
+          - outside_observation_period
+      - name: condition_start_datetime
+        description: ''
+        data_type: TIMESTAMP
+        tests:
+          - not_null
+      - name: condition_end_date
+        description: Use this date to determine the end date of the condition
+        data_type: date
+      - name: condition_end_datetime
+        description: ''
+        data_type: TIMESTAMP
+      - name: condition_type_concept_id
+        description: This field can be used to determine the provenance of the Condition record, as in whether the condition was from an EHR system, insurance claim, registry, or other sources.
+        data_type: integer
+        tests:
+          - not_null
+          - type_concept_valid:
+              config:
+                severity: error
+                tags: ['conformance']
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: condition_type_concept_id <> 0
+                to_condition: domain_id = 'Type Concept'
+          - concept_zero_rate:
+              arguments:
+                threshold: '0'
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: condition_type_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: condition_status_concept_id
+        description: This concept represents the point during the visit the diagnosis was given (admitting diagnosis, final diagnosis), whether the diagnosis was determined due to laboratory findings, if the diagnosis was exclusionary, or if it was a preliminary diagnosis, among others.
+        data_type: integer
+        tests:
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: condition_status_concept_id <> 0
+                to_condition: domain_id = 'Condition Status'
+          # 100% unmapped expected: condition status concepts use custom OMOP mappings not in source vocabulary
+          - concept_zero_rate:
+              arguments:
+                threshold: '100'
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: condition_status_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: stop_reason
+        description: The Stop Reason indicates why a Condition is no longer valid with respect to the purpose within the source data. Note that a Stop Reason does not necessarily imply that the condition is no longer occurring.
+        data_type: STRING
+      - name: provider_id
+        description: The provider associated with condition record, e.g. the provider who made the diagnosis or the provider who recorded the symptom.
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('omop__provider')
+                field: provider_id
+          # Intentionally permissive: self-reported conditions have no provider
+          - fk_null_rate:
+              config:
+                severity: warn
+              arguments:
+                threshold: 100
+        constraints:
+          - type: foreign_key
+            to: ref('omop__provider')
+            to_columns: [provider_id]
+      - name: visit_occurrence_id
+        description: The visit during which the condition occurred.
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('omop__visit_occurrence')
+                field: visit_occurrence_id
+          - fk_null_rate:
+              config:
+                severity: warn
+              arguments:
+                threshold: 23
+        constraints:
+          - type: foreign_key
+            to: ref('omop__visit_occurrence')
+            to_columns: [visit_occurrence_id]
+      - name: visit_detail_id
+        description: The VISIT_DETAIL record during which the condition occurred. For example, if the person was in the ICU at the time of the diagnosis the VISIT_OCCURRENCE record would reflect the overall hospital stay and the VISIT_DETAIL record would reflect the ICU stay during the hospital visit.
+        data_type: integer
+        constraints:
+          - type: foreign_key
+            to: ref('omop__visit_detail')
+            to_columns: [visit_detail_id]
+      - name: condition_source_value
+        description: This field houses the verbatim value from the source data representing the condition that occurred. For example, this could be an ICD10 or Read code.
+        data_type: STRING
+        tests:
+          - not_null
+      - name: condition_source_concept_id
+        description: This is the concept representing the condition source value and may not necessarily be standard. This field is discouraged from use in analysis because it is not required to contain Standard Concepts that are used across the OHDSI community, and should only be used when Standard Concepts do not adequately represent the source detail for the Condition necessary for a given analytic use case. Consider using CONDITION_CONCEPT_ID instead to enable standardized analytics that can be consistent across the network.
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+          - concept_zero_rate:
+              arguments:
+                threshold: '10'
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: condition_status_source_value
+        description: This field houses the verbatim value from the source data representing the condition status.
+        data_type: STRING

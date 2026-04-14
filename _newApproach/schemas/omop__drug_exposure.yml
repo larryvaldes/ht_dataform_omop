@@ -1,0 +1,271 @@
+version: 2
+models:
+  - name: omop__drug_exposure
+    description: >
+      This table captures records about the exposure to a Drug ingested or otherwise introduced
+      into the body. A Drug is a biochemical substance formulated in such a way that when
+      administered to a Person it will exert a certain biochemical effect on the metabolism.
+      Drugs include prescription and over-the-counter medicines, vaccines, and large-molecule
+      biologic therapies. Radiological devices ingested or applied locally do not count as Drugs.
+
+      **This is the canonical source for medication data.** The legacy `dim__medications` table
+      (removed DATA-883, 2026-04-06) was an orphaned name/code lookup with no downstream
+      consumers — it has been deleted. If you need medication data:
+        - Patient-level drug records: use this table (`omop__drug_exposure`)
+        - Drug concept metadata: use `omop__drug_exposure.drug_source_value` or join to
+          `stg_raw_athena__concept` on `drug_concept_id`
+        - Raw FHIR MedicationRequest data: use `int_firestore__normalizations_medication_request`
+        - If `dim__medications` needs to be restored: `git show` on
+          `models/legacy/dimensions/dim__medications.sql` from any commit before DATA-883
+    tests:
+      - person_completeness:
+          arguments:
+            threshold: '95'
+      - source_value_populated:
+          config:
+            severity: warn
+            tags: ['conformance']
+          arguments:
+            concept_column: drug_concept_id
+            source_value_column: drug_source_value
+    columns:
+      - name: drug_exposure_id
+        description: The unique key given to records of drug dispensings or administrations for a person. Refer to the ETL for how duplicate drugs during the same visit were handled.
+        data_type: integer
+        tests:
+          - unique:
+              config:
+                severity: error
+          - not_null:
+              config:
+                severity: error
+                tags: ['conformance']
+        constraints:
+          - type: primary_key
+      - name: person_id
+        description: The PERSON_ID of the PERSON for whom the drug dispensing or administration is recorded. This may be a system generated code.
+        data_type: integer
+        tests:
+          - not_null
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('omop__person')
+                field: person_id
+        constraints:
+          - type: foreign_key
+            to: ref('omop__person')
+            to_columns: [person_id]
+      - name: drug_concept_id
+        description: The DRUG_CONCEPT_ID field is recommended for primary use in analyses, and must be used for network studies. This is the standard concept mapped from the source concept id which represents a drug product or molecule otherwise introduced to the body. The drug concepts can have a varying degree of information about drug strength and dose. This information is relevant in the context of quantity and administration information in the subsequent fields plus strength information from the DRUG_STRENGTH table, provided as part of the standard vocabulary download.
+        data_type: integer
+        tests:
+          - not_null
+          - domain_routing_valid:
+              config:
+                severity: error
+                tags: ['conformance']
+              arguments:
+                expected_domain: Drug
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: drug_concept_id <> 0
+                to_condition: domain_id = 'Drug'
+          - concept_zero_rate:
+              arguments:
+                threshold: '7'
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: drug_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: drug_exposure_start_date
+        description: Use this date to determine the start date of the drug record.
+        data_type: date
+        tests:
+          - not_null
+          - date_not_in_future
+          - date_not_after:
+              arguments:
+                after_column: drug_exposure_end_date
+          - outside_observation_period
+      - name: drug_exposure_start_datetime
+        description: ''
+        data_type: TIMESTAMP
+      - name: drug_exposure_end_date
+        description: >
+          The DRUG_EXPOSURE_END_DATE denotes the day the drug exposure ended for the patient.
+          3-tier imputation: explicit FHIR end -> start + days_supply - 1 -> start + 29 days
+          (THEMIS T119). Clamped to start_date when computed end precedes start.
+        data_type: date
+        tests:
+          - not_null
+      - name: drug_exposure_end_datetime
+        description: ''
+        data_type: TIMESTAMP
+      - name: verbatim_end_date
+        description: This is the end date of the drug exposure as it appears in the source data, if it is given
+        data_type: date
+      - name: drug_type_concept_id
+        description: You can use the TYPE_CONCEPT_ID to delineate between prescriptions written vs. prescriptions dispensed vs. medication history vs. patient-reported exposure, etc.
+        data_type: integer
+        tests:
+          - not_null
+          - type_concept_valid:
+              config:
+                severity: error
+                tags: ['conformance']
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: drug_type_concept_id <> 0
+                to_condition: domain_id = 'Type Concept'
+          - concept_zero_rate:
+              arguments:
+                threshold: '0'
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: drug_type_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: stop_reason
+        description: The reason a person stopped a medication as it is represented in the source. Reasons include regimen completed, changed, removed, etc. This field will be retired in v6.0.
+        data_type: STRING
+      - name: refills
+        description: This is only filled in when the record is coming from a prescription written this field is meant to represent intended refills at time of the prescription.
+        data_type: integer
+      - name: quantity
+        description: ''
+        data_type: FLOAT64
+      - name: days_supply
+        description: ''
+        data_type: integer
+      - name: sig
+        description: This is the verbatim instruction for the drug as written by the provider.
+        data_type: STRING
+      - name: route_concept_id
+        description: >
+          Standard concept for drug administration route, resolved via two fallbacks:
+          (1) SNOMED route code → int_omop__standard_concept_map (Route domain), then
+          (2) FHIR route display text → seed__route_display_to_concept. 0 when unmapped.
+        data_type: integer
+        tests:
+          - dbt_utils.relationships_where:
+              config:
+                severity: warn
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: route_concept_id <> 0
+                to_condition: domain_id = 'Route'
+          - concept_zero_rate:
+              arguments:
+                threshold: '23'
+          - dbt_utils.relationships_where:
+              config:
+                severity: warn
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: route_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: lot_number
+        description: ''
+        data_type: STRING
+      - name: provider_id
+        description: The Provider associated with drug record, e.g. the provider who wrote the prescription or the provider who administered the drug. Mapped from MedicationRequest.requester via Practitioner reference.
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('omop__provider')
+                field: provider_id
+          - fk_null_rate:
+              config:
+                severity: warn
+              arguments:
+                threshold: 42
+        constraints:
+          - type: foreign_key
+            to: ref('omop__provider')
+            to_columns: [provider_id]
+      - name: visit_occurrence_id
+        description: The Visit during which the drug was prescribed, administered or dispensed.
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('omop__visit_occurrence')
+                field: visit_occurrence_id
+          - fk_null_rate:
+              config:
+                severity: warn
+              arguments:
+                threshold: 20
+        constraints:
+          - type: foreign_key
+            to: ref('omop__visit_occurrence')
+            to_columns: [visit_occurrence_id]
+      - name: visit_detail_id
+        description: The VISIT_DETAIL record during which the drug exposure occurred. For example, if the person was in the ICU at the time of the drug administration the VISIT_OCCURRENCE record would reflect the overall hospital stay and the VISIT_DETAIL record would reflect the ICU stay during the hospital visit.
+        data_type: integer
+        constraints:
+          - type: foreign_key
+            to: ref('omop__visit_detail')
+            to_columns: [visit_detail_id]
+      - name: drug_source_value
+        description: This field houses the verbatim value from the source data representing the drug exposure that occurred. For example, this could be an NDC or Gemscript code.
+        data_type: STRING
+      - name: drug_source_concept_id
+        description: This is the concept representing the drug source value and may not necessarily be standard. This field is discouraged from use in analysis because it is not required to contain Standard Concepts that are used across the OHDSI community, and should only be used when Standard Concepts do not adequately represent the source detail for the Drug necessary for a given analytic use case. Consider using DRUG_CONCEPT_ID instead to enable standardized analytics that can be consistent across the network.
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+          - concept_zero_rate:
+              arguments:
+                threshold: '10'
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: route_source_value
+        description: This field houses the verbatim value from the source data representing the drug route.
+        data_type: STRING
+      - name: dose_unit_source_value
+        description: This field houses the verbatim value from the source data representing the dose unit of the drug given.
+        data_type: STRING

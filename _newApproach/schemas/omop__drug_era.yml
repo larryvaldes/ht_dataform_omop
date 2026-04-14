@@ -1,0 +1,98 @@
+version: 2
+models:
+  - name: omop__drug_era
+    description: 'A Drug Era is defined as a span of time when the Person is assumed to be exposed to a particular active ingredient. A Drug Era is not the same as a Drug Exposure: Exposures are individual records corresponding to the source when Drug was delivered to the Person, while successive periods of Drug Exposures are combined under certain rules to produce continuous Drug Eras. Every record in the DRUG_EXPOSURE table should be part of a drug era based on the dates of exposure.'
+    tests:
+      - person_completeness:
+          arguments:
+            threshold: '95'
+    columns:
+      - name: drug_era_id
+        description: ''
+        data_type: integer
+        tests:
+          - unique:
+              config:
+                severity: error
+          - not_null:
+              config:
+                severity: error
+                tags: ['conformance']
+        constraints:
+          - type: primary_key
+      - name: person_id
+        description: ''
+        data_type: integer
+        tests:
+          - not_null
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('omop__person')
+                field: person_id
+        constraints:
+          - type: foreign_key
+            to: ref('omop__person')
+            to_columns: [person_id]
+      - name: drug_concept_id
+        description: >
+          Must be an Ingredient-class concept per OHDSI convention. The drug_era model
+          inner-joins to concept_ancestor to roll up drug exposures to their RxNorm
+          Ingredient ancestor. Exposures with no Ingredient ancestor (e.g. CVX vaccines
+          like concept 40213198 "pneumococcal conjugate vaccine, 13 valent") are
+          intentionally excluded — they have no RxNorm lineage and cannot be rolled up.
+        data_type: integer
+        tests:
+          - not_null
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: drug_concept_id <> 0
+                to_condition: domain_id = 'Drug'
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: drug_concept_id <> 0
+                to_condition: concept_class_id = 'Ingredient'
+          - concept_zero_rate:
+              arguments:
+                threshold: '0'
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: drug_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: drug_era_start_date
+        description: ''
+        data_type: date
+        tests:
+          - not_null
+          - date_not_after:
+              arguments:
+                after_column: drug_era_end_date
+          - outside_observation_period
+      - name: drug_era_end_date
+        description: ''
+        data_type: date
+        tests:
+          - not_null
+      - name: drug_exposure_count
+        description: The count of grouped DRUG_EXPOSURE records that were included in the DRUG_ERA row
+        data_type: integer
+      - name: gap_days
+        description: ''
+        data_type: integer

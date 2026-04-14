@@ -1,0 +1,50 @@
+version: 2
+models:
+  - name: omop__episode_event
+    description: The EPISODE_EVENT table connects qualifying clinical events (such as CONDITION_OCCURRENCE, DRUG_EXPOSURE, PROCEDURE_OCCURRENCE, MEASUREMENT) to the appropriate EPISODE entry. For example, linking the precise location of the metastasis (cancer modifier in MEASUREMENT) to the disease episode.
+    columns:
+      - name: episode_id
+        description: Use this field to link the EPISODE_EVENT record to its EPISODE.
+        data_type: integer
+        tests:
+          - not_null
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('omop__episode')
+                field: episode_id
+        constraints:
+          - type: foreign_key
+            to: ref('omop__episode')
+            to_columns: [episode_id]
+      - name: event_id
+        description: This field is the primary key of the linked record in the database. For example, if the Episode Event is a Condition Occurrence, then the CONDITION_OCCURRENCE_ID of the linked record goes in this field.
+        data_type: integer
+        tests:
+          - not_null
+      - name: episode_event_field_concept_id
+        description: This field is the CONCEPT_ID that identifies which table the primary key of the linked record came from.
+        data_type: integer
+        tests:
+          - not_null
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: episode_event_field_concept_id <> 0
+                to_condition: domain_id = 'Metadata'
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: episode_event_field_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]

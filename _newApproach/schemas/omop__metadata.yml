@@ -1,0 +1,47 @@
+version: 2
+models:
+  - name: omop__metadata
+    description: >
+      The METADATA table contains metadata information about a dataset that has been
+      transformed to the OMOP CDM.
+    columns:
+      - name: metadata_id
+        description: The unique key for each metadata record.
+        tests:
+          - unique:
+              config:
+                severity: error
+          - not_null:
+              config:
+                severity: error
+                tags: ['conformance']
+        constraints:
+          - type: primary_key
+      - name: metadata_concept_id
+        description: A foreign key that refers to a Standard Concept identifier in the vocabulary.
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: metadata_type_concept_id
+        description: A foreign key that refers to a concept identifier for the type of metadata.
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: name
+        description: The name of the metadata record.
+        tests:
+          - not_null
+      - name: value_as_string
+        description: The metadata value stored as a string.
+      - name: value_as_concept_id
+        description: The metadata value stored as a concept_id.
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: metadata_date
+        description: The date associated with the metadata.
+      - name: metadata_datetime
+        description: The datetime associated with the metadata.
