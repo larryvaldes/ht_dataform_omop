@@ -1,0 +1,30 @@
+config { type: "table" }
+
+-- ============================================================
+-- CDM_SOURCE  (OMOP CDM v5.4)
+-- Required metadata table describing this CDM instance.
+-- One row only. Update cdm_release_date when re-running ETL.
+-- ============================================================
+
+SELECT
+  'HealthTree OMOP CDM'                        AS cdm_source_name,
+  'HealthTree'                                 AS cdm_source_abbreviation,
+  'HealthTree Foundation'                      AS cdm_holder,
+  'HealthTree FHIR R4 patient data converted to OMOP CDM v5.4 for oncology research. Source population: multiple myeloma and related hematologic malignancy patients.'
+                                               AS source_description,
+  'https://github.com/HealthTree/ht_dataform_omop'
+                                               AS source_documentation_reference,
+  'https://github.com/HealthTree/ht_dataform_omop'
+                                               AS cdm_etl_reference,
+  DATE('2020-01-01')                           AS source_release_date,
+  CURRENT_DATE()                               AS cdm_release_date,
+  'v5.4'                                       AS cdm_version,
+  54                                           AS cdm_version_concept_id,
+
+  -- Vocabulary version pulled from the OMOP vocabulary table
+  (
+    SELECT vocabulary_version
+    FROM `healthtree-production.OMOP.Vocabulary`
+    WHERE vocabulary_id = 'None'
+    LIMIT 1
+  )                                            AS vocabulary_version
