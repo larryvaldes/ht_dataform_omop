@@ -1,0 +1,19 @@
+config {
+  type: "table"
+}
+
+SELECT
+19476524 AS observation_concept_id,
+
+* EXCEPT(observation_concept_id)
+FROM ${ref("norm_observation")}
+WHERE
+  LOWER(TRIM(REGEXP_EXTRACT(TRIM(observation_source_code), r'([^/]+)$')))
+  IN (
+    "61d32e2c27aa5e56d62b9b3345bd003c64ca956b967cf3cb2644f9a900bd1201",
+    "4e96809e470375d9f0d81f3d9334fbb980f7e514bca6467b6f92242d07df4fc5",
+    "82c91f650127bb4842ec54fae19884b96c8af0fe0fc311fbff048e3a5c3a1b3d",
+    "e390a5e81524347b802ac036da5f26936a8f3a7d7afa779a8641b45f4f262a7b"
+)
+OR
+LOWER(observation_source_value) like "%t(14;16)%"

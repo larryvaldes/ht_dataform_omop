@@ -1,0 +1,27 @@
+config {
+  type: "table"
+}
+SELECT 
+3013201 AS measurement_concept_id,
+
+  4172703 AS operator_concept_id,
+
+  CASE
+  WHEN LOWER(unit_source_value) = "mg/l" OR LOWER(unit_source_value) = "mcg/ml"
+  OR LOWER(unit_source_value) = "ug/ml" THEN 8751
+  WHEN LOWER(unit_source_value) = "g/dl" THEN 8713
+  WHEN LOWER(unit_source_value) = "mcg/l" OR LOWER(unit_source_value) = "ug/l"
+  THEN 8748 END
+  AS unit_concept_id,
+
+* EXCEPT(measurement_concept_id, operator_concept_id,
+unit_concept_id)
+FROM ${ref("measurement_semi")}
+
+WHERE measurement_source_code IN
+(
+    '14626-6',  -- Beta-2-Microglobulin
+    '1952-1',
+    '56786-7',
+    '83078-6'
+)

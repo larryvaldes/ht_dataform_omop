@@ -3,13 +3,13 @@ config {
 }
 with base as(
 SELECT
-  user.name as patient_id,
+  user as patient_id,
   ext.url,
   ext.valueCode,
   codeable.code AS codeableCode,
   codeable.system AS codeableSystem,
   codeable.display AS codeableDisplay,
-  innerExt.valueString AS innerExtValueString,
+  innerExt.valueCoding AS innerExtValueString,
   innerExt.valueCoding.code AS innerCodingCode,
   innerExt.valueCoding.system AS innerCodingSystem,
   innerExt.valueCoding.display AS innerCodingDisplay,
@@ -17,7 +17,7 @@ SELECT
   innerExtCodeable.system AS innerCodeableSystem,
   innerExtCodeable.display AS innerCodeableDisplay
 FROM
-  `healthtree-production.HT.Patient`,
+  `healthtree-production.HT_test_sync.apps-curehub-medicalResources-r4-Patient`,
   UNNEST(fhir.extension) AS ext
 LEFT JOIN
   UNNEST(ext.valueCodeableConcept.coding) AS codeable
@@ -30,7 +30,7 @@ LEFT JOIN
 select patient_id, url, codeableCode as code, codeableSystem as system, codeableDisplay as display from base
 where codeableCode is not null or codeableDisplay is not null
 UNION ALL
-select patient_id, url, null as code, null as system, innerExtValueString as display from base
+select patient_id, url, null as code, null as system, innerExtValueString.display as display from base
 where innerExtValueString is not null
 UNION ALL
 select patient_id, url, innerCodingCode as code, innerCodingSystem as system, innerCodingDisplay as display from base

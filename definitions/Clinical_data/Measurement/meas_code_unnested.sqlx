@@ -1,0 +1,16 @@
+config {
+    type: "view"
+}
+
+with base as(
+select * from `healthtree-production.HT_test_sync.apps-curehub-medicalResources-r4-Observation` where fhir is not null and user.id in
+(Select person_source_value from ${ref("allPersons")}) and (fhir.valueQuantity is not null)
+)
+
+select
+user.id as person_source_value,
+fhir.id as record_source_id,
+coding.system as system,
+COALESCE(coding.display, fhir.code.text) as display,
+coding.code as code 
+FROM base, UNNEST(fhir.code.coding) as coding

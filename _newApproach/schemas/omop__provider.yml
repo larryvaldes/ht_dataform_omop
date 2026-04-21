@@ -1,0 +1,134 @@
+version: 2
+models:
+  - name: omop__provider
+    description: >
+      OMOP CDM v5.4 Provider table — one row per distinct FHIR Practitioner.
+      Built from R4 Practitioner and PractitionerRole resources streamed from
+      patient EHR connections. NPI is populated when the EHR provides it
+      (~31% of providers). Gender is available for ~57% of providers. Specialty
+      is mapped from NUCC provider taxonomy codes in PractitionerRole resources.
+      Care site is linked through the organization dimension.
+    columns:
+      - name: provider_id
+        description: Unique provider identifier (deterministic hash of FHIR Practitioner ID).
+        tests:
+          - unique:
+              config:
+                severity: error
+          - not_null:
+              config:
+                severity: error
+                tags: ['conformance']
+        constraints:
+          - type: primary_key
+      - name: provider_name
+        description: Display name of the provider from FHIR name.text or constructed from given/family.
+      - name: npi
+        description: US National Provider Identifier when available from FHIR identifiers.
+      - name: dea
+        description: DEA number (not available from source data).
+      - name: specialty_concept_id
+        description: >
+          OMOP standard concept for provider specialty, mapped from NUCC provider
+          taxonomy codes in PractitionerRole resources via concept_relationship.
+          0 when no PractitionerRole or no specialty coding is available.
+        tests:
+          - domain_routing_valid:
+              config:
+                severity: error
+                tags: ['conformance']
+              arguments:
+                expected_domain: Provider
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+                tags: ['conformance']
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: specialty_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: care_site_id
+        description: >
+          Foreign key to omop__care_site, resolved from the organization in the
+          PractitionerRole or Practitioner resource via int_facility__organization.
+        tests:
+          - relationships:
+              config:
+                severity: warn
+              arguments:
+                to: ref('omop__care_site')
+                field: care_site_id
+          - fk_null_rate:
+              config:
+                severity: warn
+              arguments:
+                threshold: 6
+        constraints:
+          - type: foreign_key
+            to: ref('omop__care_site')
+            to_columns: [care_site_id]
+      - name: year_of_birth
+        description: Provider birth year (not available from source data).
+      - name: gender_concept_id
+        description: OMOP gender concept (8507=male, 8532=female, 0=unknown).
+        tests:
+          - domain_routing_valid:
+              config:
+                severity: error
+                tags: ['conformance']
+              arguments:
+                expected_domain: Gender
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+                tags: ['conformance']
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: gender_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: provider_source_value
+        description: Original FHIR Practitioner ID from the EHR system.
+      - name: specialty_source_value
+        description: >
+          Raw specialty text from PractitionerRole (specialty display or role text).
+      - name: specialty_source_concept_id
+        description: >
+          NUCC source concept ID for the specialty code. 0 when unmapped or unavailable.
+        tests:
+          - relationships:
+              config:
+                severity: error
+                tags: ['conformance']
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: gender_source_value
+        description: Raw FHIR gender value (male/female/other/unknown).
+      - name: gender_source_concept_id
+        description: Source concept for gender (0 — unmapped).
+        tests:
+          - relationships:
+              config:
+                severity: error
+                tags: ['conformance']
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]

@@ -1,0 +1,78 @@
+version: 2
+models:
+  - name: omop__observation_period
+    description: 'This table contains records which define spans of time during which two conditions are expected to hold: (i) Clinical Events that happened to the Person are recorded in the Event tables, and (ii) absence of records indicate such Events did not occur during this span of time.'
+    tests:
+      - person_completeness:
+          arguments:
+            threshold: '0'
+    columns:
+      - name: observation_period_id
+        description: A Person can have multiple discrete Observation Periods which are identified by the Observation_Period_Id.
+        data_type: integer
+        tests:
+          - unique:
+              config:
+                severity: error
+          - not_null:
+              config:
+                severity: error
+                tags: ['conformance']
+        constraints:
+          - type: primary_key
+      - name: person_id
+        description: The Person ID of the PERSON record for which the Observation Period is recorded.
+        data_type: integer
+        tests:
+          - not_null
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('omop__person')
+                field: person_id
+        constraints:
+          - type: foreign_key
+            to: ref('omop__person')
+            to_columns: [person_id]
+      - name: observation_period_start_date
+        description: Use this date to determine the start date of the Observation Period.
+        data_type: date
+        tests:
+          - not_null
+          - date_not_after:
+              arguments:
+                after_column: observation_period_end_date
+      - name: observation_period_end_date
+        description: Use this date to determine the end date of the period for which we can assume that all events for a Person are recorded.
+        data_type: date
+        tests:
+          - not_null
+      - name: period_type_concept_id
+        description: This field can be used to determine the provenance of the Observation Period as in whether the period was determined from an insurance enrollment file, EHR healthcare encounters, or other sources.
+        data_type: integer
+        tests:
+          - not_null
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: period_type_concept_id <> 0
+                to_condition: domain_id = 'Type Concept'
+          - concept_zero_rate:
+              arguments:
+                threshold: '0'
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: period_type_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]

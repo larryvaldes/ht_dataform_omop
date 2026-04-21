@@ -2,34 +2,30 @@ config {
     type: "view"
 }
 with base as(
-select * from `healthtree-production.HT.Observation` where fhir is not null and user.name in
-(Select person_source_value from ${ref("allPersons")}) and (fhir.valueQuantity is null and fhir.valueRange is null)
-
+select * from `healthtree-production.HT_test_sync.apps-curehub-medicalResources-r4-Observation` where fhir is not null and user.id in
+(Select person_source_value from ${ref("allPersons")}) and (fhir.valueQuantity is null)
 )
 
 select
 
-user.name as person_source_value,
+user.id as person_source_value,
 fhir.id as record_source_id,
-COALESCE(fhir.effectiveDateTime.string, CAST(fhir.effectiveDateTime.date_time as STRING), CAST(fhir.issued as STRING), fhir.effectivePeriod.start) as observation_DATE,
-COALESCE(CASE WHEN fhir.valueRatio.denominator.value != 0 THEN fhir.valueRatio.numerator.value / fhir.valueRatio.denominator.value
-ELSE NULL END) as value_as_number,
-COALESCE(fhir.valueCodeableConcept.text, fhir.valueCodeableConcept.text, fhir.valueCodeableConcept.coding[SAFE_OFFSET(0)].display,
-fhir.valueDateTime, fhir.valueAttachment.data, CONCAT(fhir.valueRatio.numerator.value, "/", fhir.valueRatio.denominator.value,
-fhir.valueTime)) as value_as_string,
+COALESCE(fhir.effectiveDateTime, CAST(fhir.issued as STRING)) as observation_DATE,
+null as value_as_number,
+COALESCE(fhir.valueString, fhir.valueCodeableConcept.text, fhir.valueCodeableConcept.text, fhir.valueCodeableConcept.coding[SAFE_OFFSET(0)].display,
+fhir.valueDateTime, fhir.valueTime) as value_as_string,
 COALESCE(fhir.valueCodeableConcept.code, fhir.valueCodeableConcept.coding[SAFE_OFFSET(0)].code) as value_as_concept_id,
-COALESCE(fhir.valueRatio.numerator.unit, fhir.valueRatio.denominator.unit, CASE WHEN fhir.valueTime is not null
+COALESCE(CASE WHEN fhir.valueTime is not null
 THEN "Time" ELSE NULL END) as unit_source_value,
-COALESCE(fhir.referenceRange[SAFE_OFFSET(0)].low.value.float, fhir.referenceRange[SAFE_OFFSET(0)].low.value.integer,
-fhir.valueRange.low.value.float, fhir.valueRange.low.value.integer) as range_low,
-COALESCE(fhir.referenceRange[SAFE_OFFSET(0)].high.value.float, fhir.referenceRange[SAFE_OFFSET(0)].high.value.integer,
-fhir.valueRange.high.value, fhir.valueRange.high.value) as range_high,
+COALESCE(fhir.referenceRange[SAFE_OFFSET(0)].low.value, fhir.referenceRange[SAFE_OFFSET(0)].low.value) as range_low,
+COALESCE(fhir.referenceRange[SAFE_OFFSET(0)].high.value, fhir.referenceRange[SAFE_OFFSET(0)].high.value) as range_high,
 fhir.encounter.reference as visit_occurrence_reference,
-fhir.encounter.display as visit_occurrence_type,
-COALESCE(fhir.code.coding[SAFE_OFFSET(0)].display, fhir.code.text) as observation_source_value,
-COALESCE(fhir.code.coding[SAFE_OFFSET(0)].code) as observation_source_code,
-COALESCE(fhir.code.coding[SAFE_OFFSET(0)].system) as observation_source_system,
+fhir.encounter.reference as visit_occurrence_type,
+ocu.display as observation_source_value,
+ocu.code as observation_source_code,
+ocu.system as observation_source_system,
 COALESCE(fhir.category[SAFE_OFFSET(0)].text, fhir.category[SAFE_OFFSET(0)].coding[SAFE_OFFSET(0)].display) as observation_source_type,
 fhir.status as observation_source_status
 
-from base
+FROM base AS b JOIN ${ref("obs_code_unnested")} AS ocu ON
+b.user.id = ocu.person_source_value AND b.fhir.id = ocu.record_source_id

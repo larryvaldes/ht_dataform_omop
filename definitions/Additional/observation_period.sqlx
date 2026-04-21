@@ -1,0 +1,74 @@
+config { type: "table" }
+
+-- ============================================================
+-- OBSERVATION_PERIOD  (OMOP CDM v5.4)
+-- One row per person covering the full span of their clinical
+-- activity in this dataset.
+--
+-- Start : earliest date across all event tables, floored at
+--         birth date to avoid pre-birth records.
+-- End   : latest date across all event tables, capped at
+--         death date (if known) to satisfy plausibleDuringLife.
+-- ============================================================
+
+WITH
+
+-- ── Collect all dated clinical events per person ─────────────
+event_dates AS (
+  SELECT person_id, condition_start_date   AS event_date FROM ${ref("condition_occurrence")}  WHERE person_id IS NOT NULL AND condition_start_date   IS NOT NULL
+  UNION ALL
+  SELECT person_id, condition_end_date                   FROM ${ref("condition_occurrence")}  WHERE person_id IS NOT NULL AND condition_end_date     IS NOT NULL
+  UNION ALL
+  SELECT person_id, drug_exposure_start_date             FROM ${ref("drug_exposure")}         WHERE person_id IS NOT NULL AND drug_exposure_start_date IS NOT NULL
+  UNION ALL
+  SELECT person_id, drug_exposure_end_date               FROM ${ref("drug_exposure")}         WHERE person_id IS NOT NULL AND drug_exposure_end_date   IS NOT NULL
+  UNION ALL
+  SELECT person_id, procedure_date                       FROM ${ref("procedure_occurrence")}  WHERE person_id IS NOT NULL AND procedure_date          IS NOT NULL
+  UNION ALL
+  SELECT person_id, measurement_date                     FROM ${ref("measurement")}           WHERE person_id IS NOT NULL AND measurement_date        IS NOT NULL
+  UNION ALL
+  SELECT person_id, SAFE_CAST(observation_date AS DATE)  FROM ${ref("observation")}           WHERE person_id IS NOT NULL AND observation_date        IS NOT NULL
+  UNION ALL
+  SELECT person_id, visit_start_date                     FROM ${ref("visit_occurrence")}      WHERE person_id IS NOT NULL AND visit_start_date        IS NOT NULL
+  UNION ALL
+  SELECT person_id, visit_end_date                       FROM ${ref("visit_occurrence")}      WHERE person_id IS NOT NULL AND visit_end_date          IS NOT NULL
+  UNION ALL
+  SELECT person_id, device_exposure_start_date           FROM ${ref("device_exposure")}       WHERE person_id IS NOT NULL AND device_exposure_start_date IS NOT NULL
+),
+
+-- ── Raw span per person ───────────────────────────────────────
+raw_span AS (
+  SELECT
+    person_id,
+    MIN(event_date) AS raw_start,
+    MAX(event_date) AS raw_end
+  FROM event_dates
+  GROUP BY person_id
+),
+
+-- ── Birth and death anchors ───────────────────────────────────
+anchors AS (
+  SELECT
+    p.person_id,
+    DATE(p.year_of_birth, COALESCE(p.month_of_birth, 1), COALESCE(p.day_of_birth, 1)) AS birth_date,
+    d.death_DATE AS death_date
+  FROM ${ref("person")} p
+  LEFT JOIN ${ref("death")} d USING (person_id)
+)
+
+SELECT
+  ROW_NUMBER() OVER (ORDER BY rs.person_id) AS observation_period_id,
+  rs.person_id,
+
+  -- Start: no earlier than birth date
+  GREATEST(rs.raw_start, COALESCE(a.birth_date, rs.raw_start)) AS observation_period_start_date,
+
+  -- End: no later than death date (if known), otherwise keep observed max
+  LEAST(rs.raw_end, COALESCE(a.death_date, rs.raw_end))        AS observation_period_end_date,
+
+  44814724 AS period_type_concept_id  -- "Period covering healthcare encounters"
+
+FROM raw_span rs
+JOIN anchors a USING (person_id)
+WHERE rs.raw_start IS NOT NULL
+  AND rs.raw_end   IS NOT NULL

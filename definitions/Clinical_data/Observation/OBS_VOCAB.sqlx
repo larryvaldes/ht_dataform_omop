@@ -1,0 +1,7 @@
+config {
+    type: "table"
+}
+
+SELECT * FROM OMOP.Concept
+WHERE vocabulary_id IN ("CPT4", "SNOMED", "LOINC", "ICD10", "ICD10CM", "ICD9CM")
+AND domain_id IN ("Observation", "Measurement", "Meas Value", "Specimen")

@@ -1,0 +1,51 @@
+config {
+  type: "view"
+}
+
+SELECT measurement_id, measurement_DATE, measurement_DATETIME, person_source_value,
+  record_source_id, person_id, measurement_time, measurement_type_concept_id, operator_concept_id,
+  value_as_number, value_as_concept_id, unit_concept_id, range_low, range_high, provider_id,
+  visit_occurrence_id, visit_detail_id, measurement_source_value, measurement_source_concept_id,
+  unit_source_value, value_source_value, measurement_source_code, measurement_source_system,
+  measurement_source_status, measurement_source_type, visit_occurrence_reference,
+  visit_occurrence_type, measurement_concept_id FROM ${ref("body_weight")}
+
+UNION ALL
+
+SELECT measurement_id, measurement_DATE, measurement_DATETIME, person_source_value,
+  record_source_id, person_id, measurement_time, measurement_type_concept_id, operator_concept_id,
+  value_as_number, value_as_concept_id, unit_concept_id, range_low, range_high, provider_id,
+  visit_occurrence_id, visit_detail_id, measurement_source_value, measurement_source_concept_id,
+  unit_source_value, value_source_value, measurement_source_code, measurement_source_system,
+  measurement_source_status, measurement_source_type, visit_occurrence_reference,
+  visit_occurrence_type, measurement_concept_id FROM ${ref("body_height")}
+
+UNION ALL
+
+SELECT measurement_id, measurement_DATE, measurement_DATETIME, person_source_value,
+  record_source_id, person_id, measurement_time, measurement_type_concept_id, operator_concept_id,
+  value_as_number, value_as_concept_id, unit_concept_id, range_low, range_high, provider_id,
+  visit_occurrence_id, visit_detail_id, measurement_source_value, measurement_source_concept_id,
+  unit_source_value, value_source_value, measurement_source_code, measurement_source_system,
+  measurement_source_status, measurement_source_type, visit_occurrence_reference,
+  visit_occurrence_type, measurement_concept_id FROM ${ref("beta2micro")}
+
+UNION ALL
+
+SELECT measurement_id, measurement_DATE, measurement_DATETIME, person_source_value,
+  record_source_id, person_id, measurement_time, measurement_type_concept_id, operator_concept_id,
+  value_as_number, value_as_concept_id, unit_concept_id, range_low, range_high, provider_id,
+  visit_occurrence_id, visit_detail_id, measurement_source_value, measurement_source_concept_id,
+  unit_source_value, value_source_value, measurement_source_code, measurement_source_system,
+  measurement_source_status, measurement_source_type, visit_occurrence_reference,
+  visit_occurrence_type, measurement_concept_id FROM ${ref("albumin")}
+
+UNION ALL
+
+SELECT measurement_id, measurement_DATE, measurement_DATETIME, person_source_value,
+  record_source_id, person_id, measurement_time, measurement_type_concept_id, operator_concept_id,
+  value_as_number, value_as_concept_id, unit_concept_id, range_low, range_high, provider_id,
+  visit_occurrence_id, visit_detail_id, measurement_source_value, measurement_source_concept_id,
+  unit_source_value, value_source_value, measurement_source_code, measurement_source_system,
+  measurement_source_status, measurement_source_type, visit_occurrence_reference,
+  visit_occurrence_type, measurement_concept_id FROM ${ref("bmi")}

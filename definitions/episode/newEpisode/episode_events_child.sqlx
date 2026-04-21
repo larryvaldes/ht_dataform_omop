@@ -1,0 +1,71 @@
+config { type: "view" }
+
+-- Cancer Surgery episodes (32939) derived from listOfProcedures in ANISH.linesOfTherapy.
+-- Each distinct procedure per LoT becomes one child episode whose episode_parent_id
+-- will be resolved to the parent LoT episode_id in episode.sqlx.
+
+WITH unnested AS (
+  SELECT
+    lwp.lineId,
+    lwp.lineOfTherapyId,
+    lwp.person_id,
+    lwp.episode_number,
+    lwp.startDate       AS lot_start,
+    lwp.endDate         AS lot_end,
+    lwp.userId,
+    lwp.diseaseId,
+    lwp.diseaseName,
+    p.snomedCode,
+    p.name  AS procedure_name,
+    p.date  AS procedure_date_raw
+  FROM ${ref("lot_with_person_and_number")} lwp
+  CROSS JOIN UNNEST(lwp.listOfProcedures) AS p
+  WHERE p.snomedCode IS NOT NULL
+),
+
+-- Map SNOMED codes to standard OMOP concept_ids
+mapped AS (
+  SELECT
+    u.*,
+    COALESCE(c.concept_id, 0) AS episode_object_concept_id
+  FROM unnested u
+  LEFT JOIN ${ref("concept")} c
+    ON  c.vocabulary_id     = 'SNOMED'
+    AND c.domain_id         IN ('Procedure', 'Device')
+    AND c.standard_concept  = 'S'
+    AND c.invalid_reason    IS NULL
+    AND c.concept_code      = CAST(u.snomedCode AS STRING)
+),
+
+-- Keep one record per (lineId, snomedCode): prefer entries that have an explicit date
+deduped AS (
+  SELECT
+    *,
+    ROW_NUMBER() OVER (
+      PARTITION BY lineId, snomedCode
+      ORDER BY
+        CASE WHEN procedure_date_raw IS NOT NULL THEN 0 ELSE 1 END,
+        procedure_date_raw
+    ) AS rk
+  FROM mapped
+)
+
+SELECT
+  lineId,
+  lineOfTherapyId,
+  person_id,
+  episode_number,
+  32939                                                     AS episode_concept_id,  -- Cancer Surgery
+  episode_object_concept_id,
+  DATE(COALESCE(procedure_date_raw, lot_start))             AS episode_start_date,
+  COALESCE(procedure_date_raw, lot_start)                   AS episode_start_datetime,
+  -- Nullify end date when lot_end precedes the episode start (mirrors episode_lines_parent guard)
+  DATE(CASE WHEN lot_end < COALESCE(procedure_date_raw, lot_start) THEN NULL ELSE lot_end END) AS episode_end_date,
+  CASE WHEN lot_end < COALESCE(procedure_date_raw, lot_start) THEN NULL ELSE lot_end END       AS episode_end_datetime,
+  userId,
+  diseaseId,
+  diseaseName,
+  procedure_name                                            AS item_name,
+  CAST(snomedCode AS STRING)                                AS item_code
+FROM deduped
+WHERE rk = 1

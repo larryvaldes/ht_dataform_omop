@@ -1,0 +1,63 @@
+config {
+  type: "view"   // o "view" si prefieres no materializar
+}
+
+/* 1) Tabla base y manual mappings */
+with base as (
+  select * from ${ref("drug_exposure")}   -- ⇐ cambia si no usas ref()
+),
+mm as (
+  select
+    trim(regexp_replace(lower(drug_name), r'[^a-z0-9]+', ' ')) as mm_norm,
+    concept_id
+  from ${ref("drug_manualMappings")}
+),
+
+/* 2) Normaliza el texto fuente donde buscarás el nombre del fármaco */
+base_norm as (
+  select
+    b.*,
+    -- usa drug_source_value como campo de referencia textual
+    trim(regexp_replace(lower(coalesce(b.drug_source_value, '')), r'[^a-z0-9]+', ' ')) as src_norm
+  from base b
+),
+
+/* 3) Encuentra posibles matches por “palabra completa” dentro del texto normalizado
+      Ej.: "... started lenalidomide 25 mg ..."  → match con "lenalidomide"            */
+candidates as (
+  select
+    bn.drug_exposure_id,
+    bn.drug_concept_id,
+    mm.concept_id as manual_concept_id,
+    mm.mm_norm,
+    -- elige el match más específico (nombre más largo primero)
+    row_number() over (
+      partition by bn.drug_exposure_id
+      order by length(mm.mm_norm) desc
+    ) as rn
+  from base_norm bn
+  join mm
+    on regexp_contains(
+         bn.src_norm,
+         r'(^| )' || mm.mm_norm || r'( |$)'
+       )
+  where coalesce(bn.drug_concept_id, 0) = 0
+),
+
+best_match as (
+  select drug_exposure_id, manual_concept_id
+  from candidates
+  where rn = 1
+),
+
+/* 4) Aplica el parche: conserva lo que ya está mapeado; si es 0, usa el manual */
+final as (
+  select
+    b.* except(drug_concept_id),
+    coalesce(nullif(b.drug_concept_id, 0), bm.manual_concept_id) as drug_concept_id
+  from base b
+  left join best_match bm
+    using (drug_exposure_id)
+)
+
+select * from final

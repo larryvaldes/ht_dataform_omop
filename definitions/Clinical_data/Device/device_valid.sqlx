@@ -66,7 +66,7 @@ SELECT
     ) AS device_source_value,
   fhir.status AS device_status_source_value,
   fhir.expirationDate AS device_exposure_end_DATE,
-  fhir.meta.lastUpdated as device_exposure_start_DATE
+  fhir.meta.lastUpdated AS device_exposure_start_DATE
 FROM
   base
 WHERE

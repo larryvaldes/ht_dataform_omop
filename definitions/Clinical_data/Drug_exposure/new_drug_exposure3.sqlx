@@ -1,0 +1,215 @@
+config {
+  type: "view"
+}
+
+/* ---------- Utilidades ---------- */
+with system_to_vocab as (
+  select 'http://www.nlm.nih.gov/research/umls/rxnorm' as system, 'RxNorm' as vocabulary_id union all
+  select 'http://www.whocc.no/atc'                      , 'ATC'                union all
+  select 'http://snomed.info/sct'                       , 'SNOMED'             union all
+  select 'http://hl7.org/fhir/sid/ndc'                  , 'NDC'
+),
+
+/* ---------- Origen MedicationRequest ---------- */
+mr as (
+  select
+    MR.id                                                        as keyId,
+    MR.user                                                      as userId,
+    MR.fhir.id                                                   as recordId,
+    MR.fhir.authoredOn                                           as authoredOn,
+    MR.fhir.courseOfTherapyType.text                             as courseOfTherapyType,
+    MR.fhir.medicationReference.display                          as medReferenceName,
+    MR.fhir.medicationReference.reference                        as medReference,
+    MR.fhir.medicationCodeableConcept.text                       as text,
+    MR.fhir.medicationCodeableConcept.coding                     as med_codings_cc,
+    MR.fhir.contained                                            as contained_arr,
+    MR.fhir.category                                             as category_arr,
+    MR.fhir.status                                               as status,
+    MR.fhir.encounter.reference                                  as visit_reference,
+    -- toma la primera dosageInstruction completa
+    (
+      select dos
+      from unnest(MR.fhir.dosageInstruction) as dos
+      limit 1
+    )                                                            as dosageInstruction
+  from `healthtree-production.HT_test_sync.apps-curehub-medicalResources-r4-MedicationRequest` as MR
+),
+
+/* ---------- Codificaciones desde recurso contenido (ingredient[].itemCodeableConcept.coding[]) ---------- */
+contained_med_codings as (
+  select
+    m.keyId,
+    cmc.system,
+    cmc.code,
+    cmc.display
+  from mr m
+  left join unnest(m.contained_arr) c
+  left join unnest(c.ingredient) ci
+  left join unnest(ci.itemCodeableConcept.coding) cmc
+),
+
+/* ---------- Union de codificaciones: directas + contenidas ---------- */
+med_codings_union as (
+  -- 1) medicationCodeableConcept.coding
+  select m.keyId, mc.system, mc.code, mc.display
+  from mr m
+  left join unnest(m.med_codings_cc) mc
+
+  union all
+
+  -- 2) contained.* ingredient.itemCodeableConcept.coding
+  select keyId, system, code, display
+  from contained_med_codings
+),
+
+/* ---------- Elige UNA codificación priorizando RxNorm ---------- */
+med_coding_ranked as (
+  select
+    u.*,
+    row_number() over (
+      partition by u.keyId
+      order by case when lower(u.system) like '%rxnorm%' then 1 else 2 end,
+               u.code
+    ) as rn
+  from med_codings_union u
+),
+one_med_code as (
+  select
+    m.*,
+    r.system  as medSystem,
+    r.code    as medCode,
+    r.display as medDisplay
+  from mr m
+  left join med_coding_ranked r
+    on r.keyId = m.keyId and r.rn = 1
+),
+
+/* ---------- Aplana dosage + category ---------- */
+mr_flat as (
+  select
+    o.*,
+    -- route / instrucciones / timing
+    o.dosageInstruction.asNeededBoolean                                    as asNeeded,
+    o.dosageInstruction.text                                                as instructions,
+    o.dosageInstruction.route.text                                          as route,
+    o.dosageInstruction.timing.repeat.boundsPeriod.start                    as start_str,
+    o.dosageInstruction.timing.repeat.boundsPeriod.end                      as end_str,
+    o.dosageInstruction.timing.repeat.frequency                              as frequency,
+    o.dosageInstruction.timing.repeat.period                                 as period,
+    o.dosageInstruction.timing.repeat.periodUnit                             as periodUnit,
+    o.dosageInstruction.patientInstruction                                   as patientInstruction,
+    o.dosageInstruction.doseAndRate[SAFE_OFFSET(0)].doseQuantity.value       as doseValue,
+    o.dosageInstruction.doseAndRate[SAFE_OFFSET(0)].doseQuantity.unit        as doseUnit,
+    o.dosageInstruction.doseAndRate[SAFE_OFFSET(0)].type.text                as doseType,
+    -- toma la primera categoría si existe
+    (select c.text from unnest(o.category_arr) c limit 1)                    as category
+  from one_med_code o
+),
+
+/* ---------- Parseo de fechas ---------- */
+typed as (
+  select
+    *,
+    coalesce(SAFE_CAST(start_str as datetime), SAFE_CAST(authoredOn as datetime)) as start_dt,
+    SAFE_CAST(end_str   as datetime)                                              as end_dt
+  from mr_flat
+),
+
+/* ---------- Mapeo a OMOP: RxNorm directo o Maps to desde vocab de origen ---------- */
+-- RxNorm directo
+rxnorm_direct as (
+  select
+    t.keyId,
+    c.concept_id as rx_concept_id
+  from typed t
+  join `healthtree-production.dataform.concept` c
+    on c.vocabulary_id = 'RxNorm'
+   and c.concept_code  = t.medCode
+),
+-- origen → concepto de origen
+source_concept as (
+  select
+    t.keyId,
+    csrc.concept_id    as src_concept_id,
+    csrc.vocabulary_id as src_vocab_id
+  from typed t
+  join system_to_vocab map
+    on lower(t.medSystem) = lower(map.system)
+  join `healthtree-production.dataform.concept` csrc
+    on csrc.vocabulary_id = map.vocabulary_id
+   and csrc.concept_code  = t.medCode
+),
+-- origen (src_concept_id) → "Maps to" → concepto estándar dominio Drug
+maps_to_std as (
+  select
+    s.keyId,
+    s.src_concept_id,
+    cstd.concept_id as std_concept_id
+  from source_concept s
+  join `healthtree-production.dataform.concept_relationship` cr
+    on cr.concept_id_1 = s.src_concept_id
+   and cr.relationship_id = 'Maps to'
+  join `healthtree-production.dataform.concept` cstd
+    on cstd.concept_id = cr.concept_id_2
+   and cstd.standard_concept = 'S'
+   and cstd.domain_id = 'Drug'
+),
+
+drug_resolution as (
+  select
+    t.*,
+    coalesce(rd.rx_concept_id, mt.std_concept_id, 0) as drug_concept_id,
+    coalesce(mt.src_concept_id, rd.rx_concept_id, 0) as drug_source_concept_id
+  from typed t
+  left join rxnorm_direct rd using(keyId)
+  left join maps_to_std  mt using(keyId)
+)
+
+/* ---------- Salida (vista staging con mapeo OMOP listo) ---------- */
+select
+  -- Identificadores
+  userId.id                           as person_source_value,
+  keyId                               as record_source_id,   -- MR.id (externo)
+  recordId                            as fhir_record_id,     -- MR.fhir.id
+
+  -- Fechas de exposición
+  cast(start_dt as date)              as drug_exposure_start_date,
+  start_dt                            as drug_exposure_start_datetime,
+  cast(end_dt as date)                as drug_exposure_end_date,
+  end_dt                              as drug_exposure_end_datetime,
+
+  -- Otros campos útiles
+  medSystem                           as drug_source_system,
+  CAST(null AS DATE)                  as verbatim_end_date,
+  null                                as drug_type_concept_id,
+  null                                as stop_reason,
+  null                                as refills,
+
+  doseValue                           as quantity,
+  case when periodUnit = 'd' then period else null end as days_supply,
+
+  instructions                        as sig,
+  route                               as route_source_value,
+  null                                as route_concept_id,
+  null                                as lot_number,
+  null                                as provider_id,
+  null                                as visit_occurrence_id,
+  null                                as visit_detail_id,
+
+  coalesce(medReferenceName, text)    as drug_source_value,
+
+  -- Mapeo a OMOP
+  drug_concept_id,
+  drug_source_concept_id,
+
+  -- Código fuente (por rastreabilidad)
+  cast(medCode as string)             as drug_source_code,
+
+  -- Otros metadatos
+  doseUnit                            as dose_unit_source_value,
+  visit_reference                     as visit_occurrence_reference,
+  category                            as visit_occurrence_type,
+  category                            as drug_source_category,
+  status                              as drug_source_status
+
+from drug_resolution

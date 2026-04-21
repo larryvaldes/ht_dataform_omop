@@ -1,0 +1,20 @@
+config {
+    type: "table"
+}
+
+  SELECT
+  passedAway,
+  p.person_id as person_id,
+  p.person_source_value as person_source_value,
+
+  passedAwayDate as death_DATE,
+  null as death_DATETIME,
+  0 as death_type_concept_id,
+  0 as cause_concept_id,
+  null as cause_source_value,
+  null as cause_source_concept_id
+
+  FROM ${ref("allPersons")} universe LEFT JOIN `healthtree-production.HT.users` users 
+  ON universe.person_source_value = users.userId
+  LEFT JOIN ${ref("person")} p ON universe.person_source_value = p.person_source_value
+  WHERE passedAway AND universe.person_source_value IS NOT NULL

@@ -1,0 +1,743 @@
+config {
+  type: "table"
+}
+
+-- =====================================================================
+-- ISS & R-ISS STAGING QUERY FOR STATE OF MYELOMA DASHBOARD
+-- =====================================================================
+-- VERSION: Enhanced with R-ISS calculations including LDH and FISH genetics
+-- Includes both ISS and R-ISS staging with comprehensive data quality tracking
+-- =====================================================================
+
+-- ⚙️ ADJUSTABLE PARAMETERS (modify these values as needed)
+-- DECLARE months_before INT64 DEFAULT 3;  -- 🔧 ADJUST: Months before diagnosis
+-- DECLARE months_after INT64 DEFAULT 3;   -- 🔧 ADJUST: Months after diagnosis
+-- DECLARE max_days_between_labs INT64 DEFAULT 14;  -- 🔧 ADJUST: Max days apart for pairing different-date labs
+
+
+-- =====================================================================
+-- STEP 1: Get base myeloma patient data
+-- =====================================================================
+WITH
+myeloma_patients AS (
+  WITH cleaned_patients AS (
+    SELECT 
+      * EXCEPT (gender, marital_status, state),
+      CASE 
+        WHEN UPPER(gender) IN ('FEMALE', 'F') THEN 'Female'
+        WHEN UPPER(gender) IN ('MALE', 'M') THEN 'Male' 
+        WHEN UPPER(gender) IN ('OTHER', 'UNKNOWN') THEN 'Other/Unknown'
+        ELSE NULL
+      END AS gender,
+      CASE 
+        WHEN UPPER(marital_status) IN (
+          'MARRIED', 'MARRIED/CIVIL UNION', 'MARRIED (INCLUDING SAME SEX)',
+          'MARRIED OR CIVIL UNION', 'MARRIED / DOMESTIC PARTNER', 'MARRIED LEGALLY'
+        ) THEN 'Married'
+        WHEN UPPER(marital_status) IN (
+          'SINGLE', 'SINGLE/NEVER MARRIED', 'NEVER MARRIED', 'UNMARRIED'
+        ) THEN 'Single'
+        WHEN UPPER(marital_status) IN (
+          'SIGNIFICANT OTHER', 'SIGNIFICANT OTHER/LIFE PARTNER', 'LIFE PARTNER',
+          'DOMESTIC PARTNER', 'REGISTERED DOMESTIC PARTNER', 'UNMARRIED DOMESTIC PARTNER',
+          'PARTNER', 'PARTNERED, LIVING TOGETHER', 'UN-MARRIED PARTNER'
+        ) THEN 'Partnered'
+        WHEN UPPER(marital_status) IN ('DIVORCED', 'LEGALLY SEPARATED', 'SEPARATED') THEN 'Divorced'
+        WHEN UPPER(marital_status) IN ('WIDOWED', 'WIDOW/WIDOWER', 'WIDOW') THEN 'Widowed'
+        WHEN UPPER(marital_status) IN (
+          'OTHER', 'UNKNOWN', 'UNKNOWN/OTHER', 'UNKNOWN/DECLINED', 'UNREPORTED', 'UNAVAILABLE'
+        ) THEN 'Other/Unknown'
+        ELSE NULL
+      END AS marital_status,
+      CASE 
+        WHEN state = 'New Mexico' THEN 'NM'
+        WHEN state = 'Not Applicab' THEN NULL
+        WHEN state IN ('ON', 'JAL') THEN NULL
+        ELSE state
+      END AS state
+    FROM `healthtree-production.dbt_prod_main.patients`
+  ),
+  deduplicated_patients AS (
+    SELECT ARRAY_AGG(t LIMIT 1)[OFFSET(0)] AS patient
+    FROM cleaned_patients t
+    GROUP BY user_id
+  )
+  SELECT 
+    p.user_id,
+    p.patient_id,
+    p.gender,
+    p.date_of_birth,
+    p.race,
+    p.ethnicity,
+    p.state,
+    md.earliest_mm_date,
+    md.earliest_myeloma_diagnosis_date,
+    COALESCE(
+      md.earliest_mm_age,
+      CASE 
+        WHEN p.date_of_birth IS NOT NULL AND md.earliest_mm_date IS NOT NULL 
+        THEN DATE_DIFF(md.earliest_mm_date, p.date_of_birth, YEAR)
+        ELSE NULL 
+      END
+    ) AS calculated_earliest_mm_age,
+    md.disease_progression_pattern
+  FROM deduplicated_patients dp
+  CROSS JOIN UNNEST([dp.patient]) AS p
+  INNER JOIN `healthtree-production.dbt_prod_main.myeloma_diagnosis_dates` md
+    ON p.user_id = md.user_id
+  WHERE md.earliest_mm_date IS NOT NULL
+),
+
+-- =====================================================================
+-- STEP 2: Extract & Standardize Beta-2-Microglobulin (B2M) labs
+-- =====================================================================
+b2m_labs AS (
+  SELECT 
+    o.user_id,
+    o.observation_id,
+    o.primary_observation_name,
+    o.primary_observation_loinc_code,
+    o.value_quantity AS b2m_value_raw,
+    o.value_quantity_unit AS b2m_unit_raw,
+    DATE(o.effective_at) AS b2m_date,
+    mp.earliest_mm_date,
+    
+    -- 🔧 UNIT STANDARDIZATION: Convert all to mg/L
+    CASE 
+      WHEN UPPER(TRIM(o.value_quantity_unit)) IN ('MG/L', 'MCG/ML', 'MG/LITER') THEN o.value_quantity
+      ELSE NULL  -- Unknown or null units excluded
+    END AS b2m_value_standardized,
+    
+    -- Flag for unit validity
+    CASE 
+      WHEN UPPER(TRIM(o.value_quantity_unit)) IN ('MG/L', 'MCG/ML', 'MG/LITER') THEN 'Valid (mg/L)'
+      WHEN o.value_quantity_unit IS NULL THEN 'Null Unit'
+      ELSE 'Unknown Unit'
+    END AS b2m_unit_flag,
+    
+    'mg/L' AS b2m_unit_standardized,
+    
+    -- Calculate days from diagnosis
+    DATE_DIFF(DATE(o.effective_at), mp.earliest_mm_date, DAY) AS days_from_diagnosis,
+    
+    -- Categorize into time windows - SIMPLIFIED
+    CASE 
+      WHEN DATE(o.effective_at) BETWEEN DATE_SUB(mp.earliest_mm_date, INTERVAL /* months_before */ 3 MONTH) 
+                               AND DATE_ADD(mp.earliest_mm_date, INTERVAL /* months_after */ 3 MONTH)
+        THEN 'within_window'  -- 🔧 Combined 6-month window (3 before + 3 after)
+      ELSE 'outside_window'
+    END AS time_window
+    
+  FROM `healthtree-production.dbt_prod_main.observations` o
+  INNER JOIN myeloma_patients mp ON o.user_id = mp.user_id
+  
+  WHERE o.primary_observation_loinc_code IN (
+    '14626-6',  -- Beta-2-Microglobulin
+    '1952-1',
+    '56786-7',
+    '83078-6'
+  )
+  AND o.value_quantity IS NOT NULL
+  AND o.effective_at IS NOT NULL
+),
+
+-- =====================================================================
+-- STEP 3: Extract & Standardize Albumin labs
+-- =====================================================================
+albumin_labs AS (
+  SELECT 
+    o.user_id,
+    o.observation_id,
+    o.primary_observation_name,
+    o.primary_observation_loinc_code,
+    o.value_quantity AS albumin_value_raw,
+    o.value_quantity_unit AS albumin_unit_raw,
+    DATE(o.effective_at) AS albumin_date,
+    mp.earliest_mm_date,
+    
+    -- 🔧 UNIT STANDARDIZATION: Convert all to g/dL
+    CASE 
+      -- Standard g/dL (just different capitalizations)
+      WHEN UPPER(TRIM(o.value_quantity_unit)) IN ('GM/DL', 'G/DL', 'GDL', 'G/DL') THEN o.value_quantity
+      
+      -- Convert mg/dL to g/dL (divide by 1000)
+      WHEN UPPER(TRIM(o.value_quantity_unit)) = 'MG/DL' THEN o.value_quantity / 1000.0
+      
+      ELSE NULL  -- Unknown or null units excluded
+    END AS albumin_value_standardized,
+    
+    -- Flag for unit validity
+    CASE 
+      WHEN UPPER(TRIM(o.value_quantity_unit)) IN ('GM/DL', 'G/DL', 'GDL', 'G/DL') THEN 'Valid (g/dL)'
+      WHEN UPPER(TRIM(o.value_quantity_unit)) = 'MG/DL' THEN 'Converted from mg/dL'
+      WHEN o.value_quantity_unit IS NULL THEN 'Null Unit'
+      ELSE 'Unknown Unit'
+    END AS albumin_unit_flag,
+    
+    'g/dL' AS albumin_unit_standardized,
+    
+    -- Calculate days from diagnosis
+    DATE_DIFF(DATE(o.effective_at), mp.earliest_mm_date, DAY) AS days_from_diagnosis,
+    
+    -- Categorize into time windows - SIMPLIFIED
+    CASE 
+      WHEN DATE(o.effective_at) BETWEEN DATE_SUB(mp.earliest_mm_date, INTERVAL /* months_before */ 3 MONTH) 
+                               AND DATE_ADD(mp.earliest_mm_date, INTERVAL /* months_after */ 3 MONTH)
+        THEN 'within_window'
+      ELSE 'outside_window'
+    END AS time_window
+    
+  FROM `healthtree-production.dbt_prod_main.observations` o
+  INNER JOIN myeloma_patients mp ON o.user_id = mp.user_id
+  
+  WHERE o.primary_observation_loinc_code IN (
+    '1751-7',   -- Albumin
+    '2862-1',
+    '54347-0',
+    '61151-7',
+    '61152-5'
+  )
+  AND o.value_quantity IS NOT NULL
+  AND o.effective_at IS NOT NULL
+),
+
+-- =====================================================================
+-- STEP 4: Extract & Standardize LDH labs (NEW FOR R-ISS)
+-- =====================================================================
+ldh_labs AS (
+  SELECT 
+    o.user_id,
+    o.observation_id,
+    o.primary_observation_name,
+    o.primary_observation_loinc_code,
+    o.value_quantity AS ldh_value_raw,
+    o.value_quantity_unit AS ldh_unit_raw,
+    DATE(o.effective_at) AS ldh_date,
+    mp.earliest_mm_date,
+    
+    -- 🔧 UNIT STANDARDIZATION: Ensure all are U/L
+    CASE 
+      WHEN UPPER(TRIM(o.value_quantity_unit)) IN ('U/L', 'U/L', 'IU/L') THEN o.value_quantity
+      ELSE NULL  -- Unknown or null units excluded
+    END AS ldh_value_standardized,
+    
+    -- Flag for unit validity
+    CASE 
+      WHEN UPPER(TRIM(o.value_quantity_unit)) IN ('U/L', 'U/L', 'IU/L') THEN 'Valid (U/L)'
+      WHEN o.value_quantity_unit IS NULL THEN 'Null Unit'
+      ELSE 'Unknown Unit'
+    END AS ldh_unit_flag,
+    
+    'U/L' AS ldh_unit_standardized,
+    
+    -- 🔧 LDH RISK CLASSIFICATION: Different thresholds by LOINC code
+    CASE 
+      WHEN o.primary_observation_loinc_code IN ('14804-9', '2532-0') THEN
+        CASE WHEN o.value_quantity >= 253 THEN 'High' ELSE 'Low' END
+      WHEN o.primary_observation_loinc_code = '14805-6' THEN
+        CASE WHEN o.value_quantity >= 600 THEN 'High' ELSE 'Low' END
+      ELSE NULL
+    END AS ldh_risk,
+    
+    -- Risk priority for worst-case selection (High = 1, Low = 2)
+    CASE 
+      WHEN o.primary_observation_loinc_code IN ('14804-9', '2532-0') THEN
+        CASE WHEN o.value_quantity >= 253 THEN 1 ELSE 2 END
+      WHEN o.primary_observation_loinc_code = '14805-6' THEN
+        CASE WHEN o.value_quantity >= 600 THEN 1 ELSE 2 END
+      ELSE 3
+    END AS ldh_risk_priority,
+    
+    -- Calculate days from diagnosis
+    DATE_DIFF(DATE(o.effective_at), mp.earliest_mm_date, DAY) AS days_from_diagnosis,
+    
+    -- Categorize into time windows
+    CASE 
+      WHEN DATE(o.effective_at) BETWEEN DATE_SUB(mp.earliest_mm_date, INTERVAL /* months_before */ 3 MONTH) 
+                               AND DATE_ADD(mp.earliest_mm_date, INTERVAL /* months_after */ 3 MONTH)
+        THEN 'within_window'
+      ELSE 'outside_window'
+    END AS time_window
+    
+  FROM `healthtree-production.dbt_prod_main.observations` o
+  INNER JOIN myeloma_patients mp ON o.user_id = mp.user_id
+  
+  WHERE o.primary_observation_loinc_code IN (
+    '14804-9',  -- LDH (threshold: 253 U/L)
+    '2532-0',   -- LDH (threshold: 253 U/L)  
+    '14805-6'   -- LDH (threshold: 600 U/L)
+  )
+  AND o.value_quantity IS NOT NULL
+  AND o.effective_at IS NOT NULL
+  AND UPPER(TRIM(o.value_quantity_unit)) IN ('U/L', 'U/L', 'IU/L')  -- Only valid units
+),
+
+-- =====================================================================
+-- STEP 5: Extract & Standardize FISH Genetics Data (NEW FOR R-ISS)
+-- =====================================================================
+fish_genetics AS (
+  SELECT 
+    -- Clean user_id format (remove 'users/' prefix if present)
+    CASE 
+      WHEN STARTS_WITH(f.user_id, 'users/') THEN REPLACE(f.user_id, 'users/', '')
+      ELSE f.user_id
+    END AS user_id,
+    
+    f.header AS fish_test_name,
+    f.effectiveDate AS fish_date,
+    f.valueCodeableConcept AS fish_result,
+    mp.earliest_mm_date,
+    
+    -- Standardize test categories
+    CASE 
+      WHEN f.header IN ('Deletion 17p13', 'Deletion 17p', 'Deletion 17p11.1', 'Deletion 17q21') 
+        THEN 'del_17p'
+      WHEN f.header = 'Translocation 4;14' 
+        THEN 't_4_14'
+      WHEN f.header = 'Translocation 14;16' 
+        THEN 't_14_16'
+      ELSE 'other'
+    END AS fish_category,
+    
+    -- Risk priority for worst-case selection (Positive = 1, Negative = 2, NULL = 3)
+    CASE 
+      WHEN UPPER(TRIM(f.valueCodeableConcept)) = 'POSITIVE' THEN 1
+      WHEN UPPER(TRIM(f.valueCodeableConcept)) = 'NEGATIVE' THEN 2
+      ELSE 3
+    END AS fish_risk_priority,
+    
+    -- Calculate days from diagnosis
+    DATE_DIFF(f.effectiveDate, mp.earliest_mm_date, DAY) AS days_from_diagnosis,
+    
+    -- Categorize into time windows
+    CASE 
+      WHEN f.effectiveDate BETWEEN DATE_SUB(mp.earliest_mm_date, INTERVAL /* months_before */ 3 MONTH) 
+                           AND DATE_ADD(mp.earliest_mm_date, INTERVAL /* months_after */ 3 MONTH)
+        THEN 'within_window'
+      ELSE 'outside_window'
+    END AS time_window
+    
+  FROM `healthtree-production.HEALTHQL.FISH_gen_markers_by_user_date` f
+  INNER JOIN myeloma_patients mp 
+    ON CASE 
+         WHEN STARTS_WITH(f.user_id, 'users/') THEN REPLACE(f.user_id, 'users/', '')
+         ELSE f.user_id
+       END = mp.user_id
+  
+  WHERE f.header IN (
+    'Deletion 17p13', 'Deletion 17p', 'Deletion 17p11.1', 'Deletion 17q21',  -- del 17p variants
+    'Translocation 4;14',   -- t(4;14)
+    'Translocation 14;16'   -- t(14;16)
+  )
+  AND f.effectiveDate IS NOT NULL
+  AND f.valueCodeableConcept IS NOT NULL
+),
+
+-- =====================================================================
+-- STEP 6: Select best LDH lab per patient (worst-case within window)
+-- =====================================================================
+best_ldh_per_patient AS (
+  SELECT 
+    user_id,
+    ldh_value_standardized AS ldh_value,
+    ldh_risk,
+    ldh_date,
+    ldh_unit_flag,
+    days_from_diagnosis AS ldh_days_from_diagnosis,
+    time_window AS ldh_time_window
+  FROM (
+    SELECT 
+      *,
+      ROW_NUMBER() OVER (
+        PARTITION BY user_id 
+        ORDER BY 
+          CASE WHEN time_window = 'within_window' THEN 1 ELSE 2 END,  -- Within window first
+          ldh_risk_priority ASC,                                       -- Worst risk (High=1, Low=2)
+          ABS(days_from_diagnosis) ASC                                  -- Closest to diagnosis
+      ) AS ldh_rank
+    FROM ldh_labs
+    WHERE ldh_value_standardized IS NOT NULL
+  )
+  WHERE ldh_rank = 1
+),
+
+-- =====================================================================
+-- STEP 7: Select best FISH genetics per patient per test type
+-- =====================================================================
+best_fish_per_patient AS (
+  SELECT 
+    user_id,
+    
+    -- del 17p result (worst case: Positive > Negative > NULL)
+    MAX(CASE WHEN fish_category = 'del_17p' THEN fish_result ELSE NULL END) AS del_17p_value,
+    MIN(CASE WHEN fish_category = 'del_17p' THEN fish_date ELSE NULL END) AS del_17p_date,
+    MIN(CASE WHEN fish_category = 'del_17p' THEN days_from_diagnosis ELSE NULL END) AS del_17p_days_from_diagnosis,
+    MIN(CASE WHEN fish_category = 'del_17p' THEN time_window ELSE NULL END) AS del_17p_time_window,
+    
+    -- t(4;14) result
+    MAX(CASE WHEN fish_category = 't_4_14' THEN fish_result ELSE NULL END) AS t_4_14_value,
+    MIN(CASE WHEN fish_category = 't_4_14' THEN fish_date ELSE NULL END) AS t_4_14_date,
+    MIN(CASE WHEN fish_category = 't_4_14' THEN days_from_diagnosis ELSE NULL END) AS t_4_14_days_from_diagnosis,
+    MIN(CASE WHEN fish_category = 't_4_14' THEN time_window ELSE NULL END) AS t_4_14_time_window,
+    
+    -- t(14;16) result
+    MAX(CASE WHEN fish_category = 't_14_16' THEN fish_result ELSE NULL END) AS t_14_16_value,
+    MIN(CASE WHEN fish_category = 't_14_16' THEN fish_date ELSE NULL END) AS t_14_16_date,
+    MIN(CASE WHEN fish_category = 't_14_16' THEN days_from_diagnosis ELSE NULL END) AS t_14_16_days_from_diagnosis,
+    MIN(CASE WHEN fish_category = 't_14_16' THEN time_window ELSE NULL END) AS t_14_16_time_window
+    
+  FROM (
+    SELECT 
+      *,
+      ROW_NUMBER() OVER (
+        PARTITION BY user_id, fish_category 
+        ORDER BY 
+          CASE WHEN time_window = 'within_window' THEN 1 ELSE 2 END,  -- Within window first
+          fish_risk_priority ASC,                                      -- Worst case (Positive=1, Negative=2)
+          ABS(days_from_diagnosis) ASC                                  -- Closest to diagnosis
+      ) AS fish_rank
+    FROM fish_genetics
+  )
+  WHERE fish_rank = 1
+  GROUP BY user_id
+),
+
+-- =====================================================================
+-- STEP 8: Create lab combinations (B2M + Albumin pairs) - EXISTING ISS LOGIC
+-- =====================================================================
+lab_combinations AS (
+  SELECT 
+    b.user_id,
+    b.earliest_mm_date,
+    
+    -- B2M info (only valid units)
+    b.b2m_value_standardized AS b2m_value,
+    b.b2m_unit_standardized AS b2m_unit,
+    b.b2m_date,
+    b.b2m_value_raw,
+    b.b2m_unit_raw,
+    b.b2m_unit_flag,
+    b.observation_id AS b2m_observation_id,
+    b.days_from_diagnosis AS b2m_days_from_diagnosis,
+    b.time_window AS b2m_time_window,
+    
+    -- Albumin info (only valid units)
+    a.albumin_value_standardized AS albumin_value,
+    a.albumin_unit_standardized AS albumin_unit,
+    a.albumin_date,
+    a.albumin_value_raw,
+    a.albumin_unit_raw,
+    a.albumin_unit_flag,
+    a.observation_id AS albumin_observation_id,
+    a.days_from_diagnosis AS albumin_days_from_diagnosis,
+    a.time_window AS albumin_time_window,
+    
+    -- Pairing metadata
+    CASE 
+      WHEN a.albumin_date = b.b2m_date THEN 'same_date'
+      WHEN a.albumin_date IS NOT NULL THEN 'different_date'
+      ELSE 'no_albumin'
+    END AS pairing_type,
+    
+    ABS(DATE_DIFF(b.b2m_date, COALESCE(a.albumin_date, b.b2m_date), DAY)) AS days_between_labs
+    
+  FROM b2m_labs b
+  LEFT JOIN albumin_labs a 
+    ON b.user_id = a.user_id
+    AND a.albumin_value_standardized IS NOT NULL  -- Only valid albumin units
+    AND (
+      a.albumin_date = b.b2m_date
+      OR ABS(DATE_DIFF(a.albumin_date, b.b2m_date, DAY)) <= /* max_days_between_labs */ 14
+    )
+  
+  WHERE b.b2m_value_standardized IS NOT NULL  -- Only valid B2M units
+),
+
+-- =====================================================================
+-- STEP 9: Calculate ISS Stage for each combination
+-- =====================================================================
+staged_combinations AS (
+  SELECT 
+    *,
+    
+    -- Calculate ISS Stage (using standardized values)
+    CASE 
+      WHEN b2m_value <= 3.5 AND albumin_value >= 3.5 THEN 'Stage 1'
+      WHEN b2m_value <= 3.5 AND albumin_value < 3.5 THEN 'Stage 2'
+      WHEN b2m_value > 3.5 AND b2m_value <= 5.5 THEN 'Stage 2'
+      WHEN b2m_value > 5.5 THEN 'Stage 3'
+      WHEN b2m_value <= 3.5 AND albumin_value IS NULL THEN 'Undefined'
+      ELSE 'Undefined'
+    END AS iss_stage,
+    
+    -- Numeric stage for sorting (lower = worse)
+    CASE 
+      WHEN b2m_value > 5.5 THEN 3
+      WHEN (b2m_value <= 3.5 AND albumin_value < 3.5) OR (b2m_value > 3.5 AND b2m_value <= 5.5) THEN 2
+      WHEN b2m_value <= 3.5 AND albumin_value >= 3.5 THEN 1
+      ELSE 0  -- Undefined
+    END AS stage_numeric,
+    
+    -- 🔧 SIMPLIFIED PRIORITY SCORE
+    -- Priority: within_window + worst stage + worst values + closest to diagnosis
+    CASE 
+      WHEN b2m_time_window = 'within_window' THEN 1   -- Labs within 3mo before/after
+      WHEN b2m_time_window = 'outside_window' THEN 2  -- Labs outside window
+      ELSE 3
+    END AS window_priority
+    
+  FROM lab_combinations
+),
+
+-- =====================================================================
+-- STEP 10: Rank all combinations per patient & select best
+-- =====================================================================
+ranked_combinations AS (
+  SELECT 
+    *,
+    ROW_NUMBER() OVER (
+      PARTITION BY user_id 
+      ORDER BY 
+        window_priority ASC,                    -- 1) Within window first
+        stage_numeric DESC,                      -- 2) Worst stage (3 > 2 > 1)
+        b2m_value DESC,                          -- 3) Higher B2M = worse
+        COALESCE(albumin_value, 999) ASC,       -- 4) Lower albumin = worse (use 999 for NULL so they sort last)
+        ABS(b2m_days_from_diagnosis) ASC,       -- 5) Closest to diagnosis date (using B2M date)
+        pairing_type ASC                         -- 6) Prefer same-date as final tiebreaker
+    ) AS combination_rank
+  FROM staged_combinations
+),
+
+-- =====================================================================
+-- STEP 11: Combine ISS with LDH and FISH data for R-ISS calculation
+-- =====================================================================
+combined_riss_data AS (
+  SELECT 
+    mp.*,  -- All myeloma patient demographics
+    
+    -- ISS staging data (best combination per patient)
+    rc.iss_stage,
+    rc.b2m_value,
+    rc.albumin_value,
+    rc.b2m_date,
+    rc.albumin_date,
+    rc.b2m_unit_flag,
+    rc.albumin_unit_flag,
+    rc.pairing_type,
+    rc.days_between_labs,
+    rc.b2m_days_from_diagnosis,
+    rc.albumin_days_from_diagnosis,
+    
+    -- ISS timing and quality info
+    CASE 
+      WHEN rc.b2m_time_window = 'within_window' THEN 'Within 3-Month Window'
+      WHEN rc.b2m_time_window = 'outside_window' THEN 'Outside Window (Review)'
+      WHEN rc.b2m_time_window IS NULL THEN 'No Valid B2M Lab'
+      ELSE 'Unknown'
+    END AS iss_timing_category,
+    
+    -- ISS quality flags
+    CASE 
+      WHEN rc.pairing_type = 'same_date' AND rc.b2m_time_window = 'within_window' 
+        THEN 'Excellent (Same Date, Within Window)'
+      WHEN rc.pairing_type = 'same_date' AND rc.b2m_time_window = 'outside_window'
+        THEN 'Good (Same Date, Outside Window)'
+      WHEN rc.pairing_type = 'different_date' AND rc.days_between_labs <= 7 AND rc.b2m_time_window = 'within_window'
+        THEN 'Good (Within 7 Days, Within Window)'
+      WHEN rc.pairing_type = 'different_date' AND rc.b2m_time_window = 'within_window'
+        THEN 'Acceptable (Different Dates, Within Window)'
+      WHEN rc.pairing_type = 'no_albumin' AND rc.iss_stage = 'Stage 3' AND rc.b2m_time_window = 'within_window'
+        THEN 'Acceptable (B2M Only Stage 3, Within Window)'
+      WHEN rc.pairing_type = 'no_albumin' AND rc.iss_stage = 'Stage 2' AND rc.b2m_time_window = 'within_window'
+        THEN 'Acceptable (B2M Only Stage 2, Within Window)'
+      WHEN rc.b2m_time_window = 'outside_window'
+        THEN 'Review Required (Outside Window)'
+      WHEN rc.pairing_type IS NULL THEN 'No Valid Labs'
+      ELSE 'Review Required'
+    END AS data_quality_flag,
+    
+    -- LDH data
+    ldh.ldh_value,
+    ldh.ldh_risk,
+    ldh.ldh_date,
+    ldh.ldh_unit_flag,
+    ldh.ldh_days_from_diagnosis,
+    ldh.ldh_time_window,
+    
+    -- FISH genetics data
+    fish.del_17p_value,
+    fish.del_17p_date,
+    fish.del_17p_days_from_diagnosis,
+    fish.del_17p_time_window,
+    
+    fish.t_4_14_value,
+    fish.t_4_14_date,
+    fish.t_4_14_days_from_diagnosis,
+    fish.t_4_14_time_window,
+    
+    fish.t_14_16_value,
+    fish.t_14_16_date,
+    fish.t_14_16_days_from_diagnosis,
+    fish.t_14_16_time_window
+    
+  FROM myeloma_patients mp
+  LEFT JOIN ranked_combinations rc 
+    ON mp.user_id = rc.user_id 
+    AND rc.combination_rank = 1
+  LEFT JOIN best_ldh_per_patient ldh
+    ON mp.user_id = ldh.user_id
+  LEFT JOIN best_fish_per_patient fish
+    ON mp.user_id = fish.user_id
+),
+
+-- =====================================================================
+-- STEP 12: Calculate R-ISS Stage using the provided R algorithm
+-- =====================================================================
+final_riss_calculations AS (
+  SELECT 
+    *,
+    
+    -- 🧬 R-ISS CALCULATION: Implementing the provided R algorithm
+    CASE 
+      -- R-ISS Stage 1: ISS Stage 1 + Low LDH + All genetics negative
+      WHEN iss_stage = 'Stage 1'
+        AND UPPER(COALESCE(ldh_risk, 'NULL')) = 'LOW'
+        AND UPPER(COALESCE(del_17p_value, 'NEGATIVE')) = 'NEGATIVE'
+        AND UPPER(COALESCE(t_4_14_value, 'NEGATIVE')) = 'NEGATIVE'
+        AND UPPER(COALESCE(t_14_16_value, 'NEGATIVE')) = 'NEGATIVE'
+      THEN 'R-ISS Stage 1'
+      
+      -- R-ISS Stage 2: Various intermediate conditions
+      WHEN (
+        -- ISS Stage 1 with any high-risk feature
+        (iss_stage = 'Stage 1' AND (
+          UPPER(COALESCE(ldh_risk, 'NULL')) = 'HIGH' OR
+          UPPER(COALESCE(del_17p_value, 'NULL')) = 'POSITIVE' OR
+          UPPER(COALESCE(t_4_14_value, 'NULL')) = 'POSITIVE' OR
+          UPPER(COALESCE(t_14_16_value, 'NULL')) = 'POSITIVE'
+        )) OR
+        
+        -- Any ISS Stage 2
+        iss_stage = 'Stage 2' OR
+        
+        -- ISS Stage 3 with all low-risk features
+        (iss_stage = 'Stage 3' AND 
+          UPPER(COALESCE(ldh_risk, 'NULL')) = 'LOW' AND
+          UPPER(COALESCE(del_17p_value, 'NEGATIVE')) = 'NEGATIVE' AND
+          UPPER(COALESCE(t_4_14_value, 'NEGATIVE')) = 'NEGATIVE' AND
+          UPPER(COALESCE(t_14_16_value, 'NEGATIVE')) = 'NEGATIVE'
+        )
+      ) THEN 'R-ISS Stage 2'
+      
+      -- R-ISS Stage 3: ISS Stage 3 with any high-risk feature
+      WHEN iss_stage = 'Stage 3' AND (
+        UPPER(COALESCE(ldh_risk, 'NULL')) = 'HIGH' OR
+        UPPER(COALESCE(del_17p_value, 'NULL')) = 'POSITIVE' OR
+        UPPER(COALESCE(t_4_14_value, 'NULL')) = 'POSITIVE' OR
+        UPPER(COALESCE(t_14_16_value, 'NULL')) = 'POSITIVE'
+      ) THEN 'R-ISS Stage 3'
+      
+      -- Undefined cases
+      ELSE 'Undefined'
+    END AS r_iss_stage,
+    
+    -- R-ISS Data availability flags for analysis
+    CASE WHEN iss_stage IN ('Stage 1', 'Stage 2', 'Stage 3') THEN 'Yes' ELSE 'No' END AS has_valid_iss,
+    CASE WHEN ldh_risk IS NOT NULL THEN 'Yes' ELSE 'No' END AS has_ldh_data,
+    CASE WHEN del_17p_value IS NOT NULL THEN 'Yes' ELSE 'No' END AS has_del_17p_data,
+    CASE WHEN t_4_14_value IS NOT NULL THEN 'Yes' ELSE 'No' END AS has_t_4_14_data,
+    CASE WHEN t_14_16_value IS NOT NULL THEN 'Yes' ELSE 'No' END AS has_t_14_16_data,
+    
+    -- Overall R-ISS data completeness
+    CASE 
+      WHEN iss_stage IN ('Stage 1', 'Stage 2', 'Stage 3') 
+        AND ldh_risk IS NOT NULL 
+        AND del_17p_value IS NOT NULL 
+        AND t_4_14_value IS NOT NULL 
+        AND t_14_16_value IS NOT NULL 
+      THEN 'Complete R-ISS Data'
+      WHEN iss_stage IN ('Stage 1', 'Stage 2', 'Stage 3') 
+      THEN 'Partial R-ISS Data (Missing LDH/Genetics)'
+      ELSE 'No R-ISS Data (No Valid ISS)'
+    END AS r_iss_data_completeness
+    
+  FROM combined_riss_data
+)
+
+-- =====================================================================
+-- FINAL OUTPUT: ISS & R-ISS Results with Demographics
+-- =====================================================================
+SELECT 
+  -- Patient identifiers
+  user_id,
+  patient_id,
+  
+  -- Demographics for filtering
+  gender,
+  date_of_birth,
+  race,
+  ethnicity,
+  state,
+  calculated_earliest_mm_age AS age_at_mm_diagnosis,
+  
+  -- Diagnosis info
+  earliest_mm_date,
+  disease_progression_pattern,
+  
+  -- === ISS STAGING RESULTS ===
+  COALESCE(iss_stage, 'No Valid B2M Lab') AS iss_stage,
+  
+  -- ISS Lab Details (STANDARDIZED)
+  b2m_value,
+  albumin_value,
+  b2m_date AS b2m_observation_date,
+  albumin_date AS albumin_observation_date,
+  b2m_days_from_diagnosis,
+  albumin_days_from_diagnosis,
+  b2m_unit_flag,
+  albumin_unit_flag,
+  
+  -- ISS Lab Quality
+  pairing_type,
+  days_between_labs,
+  iss_timing_category,
+  data_quality_flag,
+  
+  -- === R-ISS STAGING RESULTS ===
+  r_iss_stage,
+  
+  -- R-ISS Component Data
+  ldh_value,
+  ldh_risk,
+  ldh_date,
+  ldh_days_from_diagnosis,
+  ldh_time_window,
+  ldh_unit_flag,
+  
+  -- FISH Genetics Data
+  del_17p_value,
+  del_17p_date,
+  del_17p_days_from_diagnosis,
+  del_17p_time_window,
+  
+  t_4_14_value,
+  t_4_14_date,
+  t_4_14_days_from_diagnosis,
+  t_4_14_time_window,
+  
+  t_14_16_value,
+  t_14_16_date,
+  t_14_16_days_from_diagnosis,
+  t_14_16_time_window,
+  
+  -- R-ISS Data Quality Metrics
+  has_valid_iss,
+  has_ldh_data,
+  has_del_17p_data,
+  has_t_4_14_data,
+  has_t_14_16_data,
+  r_iss_data_completeness
+
+FROM final_riss_calculations
+
+ORDER BY earliest_mm_date DESC

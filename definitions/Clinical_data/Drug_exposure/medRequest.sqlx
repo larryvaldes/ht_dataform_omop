@@ -1,0 +1,59 @@
+config {
+  type: "view"
+}
+
+WITH MM_Medications AS(
+SELECT isActiveIngredient, createdAt, m.name, m.longName, longName, RXCUI, activeIngredients
+FROM healthtree-production.HT.medicationMappings AS m),
+
+intermediate as (
+SELECT id as keyId, user as userId, fhir.id as recordId, fhir.authoredOn, fhir.courseOfTherapyType.text as courseOfTherapyType, fhir.medicationReference.display as medReferenceName, fhir.medicationReference.reference as medReference, fhir.medicationCodeableConcept.text as text, cc.display as name, cc.code as code, cc.system as medSystem, catg.text as category, fhir.status, (
+        SELECT dos
+      FROM UNNEST(fhir.dosageInstruction) AS dos
+      LIMIT 1
+) as dosageInstruction,
+fhir.encounter.reference as visit_reference FROM `healthtree-production.HT_test_sync.apps-curehub-medicalResources-r4-MedicationRequest` AS MR LEFT JOIN UNNEST(fhir.medicationCodeableConcept.coding) as cc LEFT JOIN UNNEST(fhir.category) as catg
+
+),
+
+intermediateWithDosage as (
+
+SELECT * except(dosageInstruction), dosageInstruction.asNeededBoolean as asNeeded, dosageInstruction.text as instructions, dosageInstruction.route.text as route, dosageInstruction.timing.repeat.boundsPeriod.start as start, dosageInstruction.timing.repeat.boundsPeriod.end as endt, dosageInstruction.timing.repeat.frequency, dosageInstruction.timing.repeat.period, dosageInstruction.timing.repeat.periodUnit, dosageInstruction.patientInstruction, dosageInstruction.doseAndRate[SAFE_OFFSET(0)].doseQuantity.value as doseValue, dosageInstruction.doseAndRate[SAFE_OFFSET(0)].doseQuantity.unit as doseUnit, dosageInstruction.doseAndRate[SAFE_OFFSET(0)].type.text as doseType
+FROM intermediate),
+
+intermediateWithRXCUI as (
+
+SELECT iwd.* except(keyId), mm.name as RXCUI FROM intermediateWithDosage iwd LEFT JOIN `healthtree-production.HT.MedicationRequest` mr ON iwd.keyId = mr.__key__.name LEFT JOIN UNNEST(mr.medicationMappings) as mm
+WHERE mr.fhir is null)
+
+
+SELECT
+userId as person_source_value,
+recordId as record_source_id,
+COALESCE(SAFE_CAST(start AS DATE),SAFE_CAST(authoredOn AS DATE)) as drug_exposure_start_DATE,
+COALESCE(SAFE_CAST(start AS DATETIME),SAFE_CAST(authoredOn AS DATETIME)) as drug_exposure_start_DATETIME,
+SAFE_CAST(endt as DATE) as drug_exposure_end_DATE,
+SAFE_CAST(endt AS DATETIME) as drug_exposure_end_DATETIME,
+medSystem as drug_source_system,
+null as verbatim_end_DATE,
+null as drug_type_concept_id,
+null as stop_reason,
+null as refills,
+doseValue as quantity,
+CASE WHEN periodUnit like "d" THEN period ELSE null END as days_supply,
+instructions as sig,
+route as route_source_value,
+null as route_concept_id,
+null as lot_number,
+null as provider_id,
+null as visit_occurrence_id,
+null as visit_detail_id,
+COALESCE(medReferenceName, text) as drug_source_value,
+RXCUI as drug_source_concept_id,
+RXCUI as drug_source_code,
+doseUnit as dose_unit_source_value,
+visit_reference as visit_occurrence_reference,
+category as visit_occurrence_type,
+category as drug_source_category,
+status as drug_source_status
+FROM intermediateWithRXCUI WHERE RXCUI in (SELECT RXCUI FROM MM_Medications)

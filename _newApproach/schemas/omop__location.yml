@@ -1,0 +1,67 @@
+version: 2
+models:
+  - name: omop__location
+    description: The LOCATION table represents a generic way to capture physical location or address information of Persons and Care Sites.
+    columns:
+      - name: location_id
+        description: The unique key given to a unique Location.
+        data_type: integer
+        tests:
+          - unique:
+              config:
+                severity: error
+          - not_null:
+              config:
+                severity: error
+                tags: ['conformance']
+        constraints:
+          - type: primary_key
+      - name: address_1
+        description: The address field 1, typically used for the street address, as it appears in the source data.
+        data_type: STRING
+      - name: address_2
+        description: The address field 2, typically used for additional detail such as buildings, suites, floors, as it appears in the source data.
+        data_type: STRING
+      - name: city
+        description: The city field as it appears in the source data.
+        data_type: STRING
+      - name: state
+        description: The state field as it appears in the source data.
+        data_type: STRING
+      - name: zip
+        description: The zip or postal code.
+        data_type: STRING
+      - name: county
+        description: The county.
+        data_type: STRING
+      - name: country
+        description: The country.
+        data_type: STRING
+      - name: latitude
+        description: The geocoded latitude.
+        data_type: FLOAT64
+      - name: longitude
+        description: The geocoded longitude.
+        data_type: FLOAT64
+      - name: location_source_value
+        description: The verbatim information that is used to uniquely identify the location as it appears in the source data.
+        data_type: STRING
+      - name: country_concept_id
+        description: >
+          The Concept Id representing the country. Values should conform to the
+          Geography domain.
+        data_type: integer
+        tests:
+          - domain_routing_valid:
+              config:
+                severity: error
+                tags: ['conformance']
+              arguments:
+                expected_domain: Geography
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: country_source_value
+        description: The country value as it appears in the source data.
+        data_type: STRING

@@ -1,0 +1,73 @@
+config {
+  type: "table"
+}
+
+WITH your_table AS(SELECT * FROM ${ref("norm_observation")}
+WHERE REGEXP_CONTAINS(LOWER(value_source_value), '(^|[^a-z])ecog([^a-z]|$)')
+),
+
+norm AS (
+  SELECT
+    t.*,
+    LOWER(REGEXP_REPLACE(value_as_string, r'[\s]+', ' ')) AS txt
+  FROM your_table t
+),
+explicit AS (
+  SELECT
+    *,
+    -- 1) Si el texto comienza con un dígito 0-5 seguido de no-dígito (espacio, punto, guion, fin, etc.), tomarlo.
+    SAFE_CAST(REGEXP_EXTRACT(txt, r'^\s*([0-5])(?:\D|$)') AS INT64) AS ecog_leading_digit,
+
+    -- 2) "ECOG 2", "WHO PS=1", "Zubrod 3", etc.
+    SAFE_CAST(REGEXP_EXTRACT(txt, r'\b(?:ecog|who\s*ps|zubrod|performance\s+status|ps)\s*[:=]?\s*(\d)') AS INT64) AS ecog_explicit_single,
+
+    -- 3) Rangos "ECOG 1-2" -> tomar el extremo alto (2)
+    SAFE_CAST(REGEXP_EXTRACT(txt, r'\b(?:ecog|who\s*ps|zubrod|performance\s+status|ps)\s*[:=]?\s*\d\s*[-/]\s*(\d)') AS INT64) AS ecog_explicit_range_hi
+  FROM norm
+),
+heur AS (
+  SELECT
+    *,
+    CASE
+      -- 5
+      WHEN REGEXP_CONTAINS(txt, r'\b(deceased|expired|dead)\b') THEN 5
+      -- 4
+      WHEN REGEXP_CONTAINS(txt, r'\b(completely disabled|cannot carry on any self[- ]?care|totally confined to (?:bed|chair)|bedbound|bed[- ]?ridden)\b') THEN 4
+      -- 3
+      WHEN REGEXP_CONTAINS(txt, r'\b(limited self[- ]?care|in (?:bed|chair) (?:more than|>?)\s*50%|confined to (?:bed|chair) (?:most|>?\s*50%)\b)') THEN 3
+      -- 2
+      WHEN REGEXP_CONTAINS(txt, r'\b(unable to (?:carry out )?any work (?:activity|activities)|up and about (?:more than|>?)\s*50%|ambulatory and capable of all self[- ]?care)\b') THEN 2
+      -- 1
+      WHEN REGEXP_CONTAINS(txt, r'\b(restricted in (?:physically )?strenuous activity|ambulatory\b|light work|sedentary (?:work|nature)|office work|house ?work)\b') THEN 1
+      -- 0
+      WHEN REGEXP_CONTAINS(txt, r'\b(fully active|no (?:restriction|limitations)|asymptomatic)\b') THEN 0
+      ELSE NULL
+    END AS ecog_heur
+  FROM explicit
+),
+
+ecog_inf AS (SELECT
+  *,
+  COALESCE(
+    ecog_leading_digit,         -- <- ahora primero
+    ecog_explicit_range_hi,
+    ecog_explicit_single,
+    ecog_heur
+  ) AS ecog_inferred
+FROM heur)
+
+SELECT
+4167763 AS observation_concept_id,
+CASE WHEN ecog_inferred = 0 THEN 4175026
+WHEN ecog_inferred = 1 THEN 4173614
+WHEN ecog_inferred = 2 THEN 4172043
+WHEN ecog_inferred = 3 THEN 4174241
+WHEN ecog_inferred = 4 THEN 4174251
+ELSE 0
+END AS value_as_concept_id,
+
+ecog_inferred AS value_as_number,
+
+  * EXCEPT(observation_concept_id, value_as_concept_id, txt, ecog_leading_digit,
+  ecog_explicit_single, ecog_explicit_range_hi, ecog_heur, ecog_inferred, value_as_number)
+  FROM ecog_inf

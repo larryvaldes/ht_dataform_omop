@@ -1,0 +1,67 @@
+config {
+    type: "table"
+}
+
+WITH lot AS (
+  SELECT
+    t.*,
+    ROW_NUMBER() OVER (PARTITION BY userId ORDER BY startDate ASC) AS numberOfLine,
+    LOWER(TRIM(t.outcome)) AS outcome_norm
+  FROM `healthtree-production.ANISH.linesOfTherapy` t
+  WHERE t.validated = TRUE
+),
+
+direct_match AS (
+  SELECT
+    l.*,
+    m.id AS direct_mapping_id,
+    m.source_text AS direct_canonical_text,
+    m.concept_id AS direct_concept_id
+  FROM lot l
+  LEFT JOIN `healthtree-production.HT_test_sync.outcomeMappings` m
+    ON LOWER(TRIM(m.source_text)) = l.outcome_norm
+),
+
+alias_match AS (
+  SELECT
+    d.*,
+    a.id AS alias_row_id,
+    a.alias_text AS matched_alias_text,
+    a.outcome_mapping_id AS alias_mapping_id,
+    m2.source_text AS alias_canonical_text,
+    m2.concept_id AS alias_concept_id
+  FROM direct_match d
+  LEFT JOIN `healthtree-production.HT_test_sync.outcomeMappingAliases` a
+    ON LOWER(TRIM(a.alias_text)) = d.outcome_norm
+  LEFT JOIN `healthtree-production.HT_test_sync.outcomeMappings` m2
+    ON m2.id = a.outcome_mapping_id
+)
+
+SELECT
+  -- Identidad / tracking
+  id AS lot_row_id,
+  lineOfTherapyId,
+  userId,
+  numberOfLine,
+
+  -- Outcome original
+  outcome AS outcome_source_text,
+
+  -- Resultado del mapeo (NUNCA NULL)
+  CAST(COALESCE(direct_concept_id, alias_concept_id, 0) AS INT64) AS concept_id,
+
+  -- Debug opcional: cómo se resolvió
+  CASE
+    WHEN direct_mapping_id IS NOT NULL THEN 'direct'
+    WHEN alias_mapping_id  IS NOT NULL THEN 'alias'
+    ELSE 'none'
+  END AS mapping_resolution,
+
+  COALESCE(direct_canonical_text, alias_canonical_text) AS canonical_source_text,
+  matched_alias_text,
+
+  -- Fechas útiles para tu staging
+  startDate,
+  endDate
+
+FROM alias_match

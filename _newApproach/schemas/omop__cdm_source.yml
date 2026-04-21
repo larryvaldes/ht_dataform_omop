@@ -1,0 +1,35 @@
+version: 2
+models:
+  - name: omop__cdm_source
+    description: >
+      The CDM_SOURCE table contains detail about the source database and the process
+      used to transform the data into the OMOP CDM. Required by OHDSI Achilles, DQD, and Atlas.
+    columns:
+      - name: cdm_source_name
+        description: The full name of the source.
+        tests:
+          - not_null
+      - name: cdm_source_abbreviation
+        description: An abbreviation of the source name.
+      - name: cdm_holder
+        description: The name of the organization responsible for the CDM instance.
+      - name: source_description
+        description: A description of the source data.
+      - name: cdm_etl_reference
+        description: A link to the ETL documentation.
+      - name: source_documentation_reference
+        description: A link to the source data documentation.
+      - name: source_release_date
+        description: The date the source data was released.
+      - name: cdm_release_date
+        description: The date the CDM was released.
+      - name: cdm_version
+        description: The version of the CDM used.
+      - name: cdm_version_concept_id
+        description: The concept_id representing the CDM version.
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: vocabulary_version
+        description: The version of the OMOP Standardized Vocabularies.

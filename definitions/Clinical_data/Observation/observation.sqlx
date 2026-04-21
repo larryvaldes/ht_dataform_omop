@@ -1,34 +1,198 @@
 config {
-    type: "table"
+  type: "table"
 }
 
-select
-ROW_NUMBER() OVER (ORDER BY (Select null)) as observation_id,
-p.person_source_value as person_source_value,
-ov.record_source_id as record_source_id,
-p.person_id as person_id,
-null as observation_concept_id,
-ov.observation_DATE as observation_DATE,
-null as observation_DATETIME,
-null as observation_type_concept_id,
-ov.value_as_number as value_as_number,
-ov.value_as_string as value_as_string,
-ov.value_as_concept_id as value_as_concept_id,
-null as qualifier_concept_id,
-null as unit_concept_id,
-null as provider_id,
-null as visit_occurrence_id,
-null as visit_detail_id,
-ov.observation_source_value as observation_source_value,
-null as oservation_source_concept_id,
-ov.unit_source_value as unit_source_value,
-null as qualifier_source_value,
+-- 1) Universo base: norm_observation (mapeo estándar)
+WITH base AS (
+  SELECT
+    b.*,
+    1 AS mapping_layer
+  FROM ${ref("norm_observation")} b
+),
 
-ov.visit_occurrence_reference as visit_occurrence_reference,
-ov.visit_occurrence_type as visit_occurrence_type,
-ov.observation_source_code as observation_source_code,
-ov.observation_source_system as observation_source_system,
-ov.observation_source_type as observation_source_type,
-ov.observation_source_status as observation_source_status
+-- 2) Universo prioritario: obs_adjusted (mapeos mejorados / heurísticos)
+priority AS (
+  SELECT
+    p.*,
+    2 AS mapping_layer
+  FROM ${ref("obs_adjusted")} p
+),
 
-from ${ref("observation_valid")} ov join ${ref("person")} p on ov.person_source_value = p.person_source_value
+-- 2.5) Universo adicional: outcomes artificiales como OBSERVATION
+art_outcomes AS (
+  SELECT
+    -- observation_id determinístico y namespaced
+    ABS(FARM_FINGERPRINT(CONCAT(
+      'ART_OUTCOME|',
+      CAST(o.observation_id AS STRING)
+    ))) AS observation_id,
+
+    o.person_id,
+    p.person_source_value,
+
+    CONCAT('ART_OUTCOME|', CAST(o.observation_id AS STRING)) AS record_source_id,
+
+    o.observation_concept_id,
+    CAST(o.observation_date AS DATE) AS observation_DATE,
+    CAST(o.observation_datetime AS DATETIME) AS observation_DATETIME,
+    o.observation_type_concept_id,
+
+    o.value_as_number,
+    o.value_as_string,
+    COALESCE(o.value_as_concept_id, 0) AS value_as_concept_id,
+
+    o.qualifier_concept_id,
+    o.unit_concept_id,
+    o.provider_id,
+    o.visit_occurrence_id,
+    o.visit_detail_id,
+
+    o.observation_source_value,
+    o.observation_source_concept_id,
+    o.unit_source_value,
+    o.qualifier_source_value,
+    o.value_source_value,
+
+    CAST(NULL AS INT64) AS observation_event_id,
+    CAST(NULL AS INT64) AS obs_event_field_concept_id,
+    CAST(NULL AS STRING) AS observation_source_code,
+
+    3 AS mapping_layer
+  FROM ${ref("outcomeAsObs")} o
+  LEFT JOIN ${ref("person")} p
+    ON p.person_id = o.person_id
+),
+
+-- 3) Combinamos todo el universo
+combined AS (
+  SELECT
+    observation_id,
+    person_id,
+    person_source_value,
+    record_source_id,
+    observation_concept_id,
+    observation_DATE,
+    observation_DATETIME,
+    observation_type_concept_id,
+    value_as_number,
+    value_as_string,
+    value_as_concept_id,
+    qualifier_concept_id,
+    unit_concept_id,
+    provider_id,
+    visit_occurrence_id,
+    visit_detail_id,
+    observation_source_value,
+    observation_source_concept_id,
+    unit_source_value,
+    qualifier_source_value,
+    value_source_value,
+    observation_event_id,
+    obs_event_field_concept_id,
+    observation_source_code,
+    mapping_layer
+  FROM base
+
+  UNION ALL
+
+  SELECT
+    observation_id,
+    person_id,
+    person_source_value,
+    record_source_value AS record_source_id,
+    observation_concept_id,
+    observation_DATE,
+    observation_DATETIME,
+    observation_type_concept_id,
+    value_as_number,
+    value_as_string,
+    value_as_concept_id,
+    qualifier_concept_id,
+    unit_concept_id,
+    provider_id,
+    visit_occurrence_id,
+    visit_detail_id,
+    observation_source_value,
+    observation_source_concept_id,
+    unit_source_value,
+    qualifier_source_value,
+    value_source_value,
+    observation_event_id,
+    obs_event_field_concept_id,
+    observation_source_code,
+    mapping_layer
+  FROM priority
+
+  UNION ALL
+
+  SELECT
+    observation_id,
+    person_id,
+    person_source_value,
+    record_source_id,
+    observation_concept_id,
+    observation_DATE,
+    observation_DATETIME,
+    observation_type_concept_id,
+    value_as_number,
+    value_as_string,
+    value_as_concept_id,
+    qualifier_concept_id,
+    unit_concept_id,
+    provider_id,
+    visit_occurrence_id,
+    visit_detail_id,
+    observation_source_value,
+    observation_source_concept_id,
+    unit_source_value,
+    qualifier_source_value,
+    value_source_value,
+    observation_event_id,
+    obs_event_field_concept_id,
+    observation_source_code,
+    mapping_layer
+  FROM art_outcomes
+),
+
+-- 4) Calculamos flags por par (persona, registro fuente)
+flagged AS (
+  SELECT
+    c.*,
+
+    MAX(
+      IF(COALESCE(c.observation_concept_id, 0) != 0, 1, 0)
+    ) OVER (
+      PARTITION BY c.person_source_value, c.record_source_id
+    ) AS has_any_map,
+
+    MAX(
+      IF(
+        COALESCE(c.observation_concept_id, 0) != 0
+        AND c.mapping_layer = 2,
+        1,
+        0
+      )
+    ) OVER (
+      PARTITION BY c.person_source_value, c.record_source_id
+    ) AS has_priority_map
+  FROM combined c
+)
+
+-- 5) Regla final
+SELECT
+  * EXCEPT(has_any_map, has_priority_map, mapping_layer)
+FROM flagged
+WHERE
+  (
+    has_priority_map = 1
+    AND mapping_layer = 2
+    AND COALESCE(observation_concept_id, 0) != 0
+  )
+  OR (
+    has_priority_map = 0
+    AND has_any_map = 1
+    AND COALESCE(observation_concept_id, 0) != 0
+  )
+  OR (
+    has_any_map = 0
+  )

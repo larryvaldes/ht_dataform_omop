@@ -1,31 +1,177 @@
 config {
-    type: "table"
+  type: "table"
 }
 
-Select
-pv.person_source_value as person_source_value,
-pv.record_source_id as record_source_id,
- ROW_NUMBER() OVER (ORDER BY (Select null)) as procedure_occurrence_id,
- p.person_id as person_id,
- null as procedure_concept_id,
- pv.procedure_DATE as procedure_DATE,
- null as procedure_DATETIME,
- null as procedure_type_concept_id,
- null as modifier_concept_id,
- null as quantity,
- null as provider_id,
- null as visit_occurrence_id,
+WITH norm AS (
+  SELECT
+    -- Todas las columnas normales, excluyendo los JSON/arrays problemáticos
+    p.* EXCEPT(procedureMappings, contained, note, id, context, containedStatuses),
 
-pv.visit_occurrence_reference as visit_occurrence_reference,
+    JSON_VALUE(p.id, '$.id') AS norm_id,
+    JSON_VALUE(pm, '$.id') AS mapping_id
+  FROM
+    `healthtree-production.HT_test_sync.apps-curehub-medicalResources-normalizations-Procedure` AS p
+  CROSS JOIN
+    UNNEST(p.procedureMappings) AS pm
+  WHERE
+    (p.migratedFromRailsHealthtree = FALSE OR p.migratedFromRailsHealthtree IS NULL)
+    AND p.success = TRUE
+    AND (p.useInLogicDisallowed = FALSE OR p.useInLogicDisallowed IS NULL)
+    AND p.user.id IN (SELECT ap.person_source_value FROM ${ref("allPersons")} ap)
+    AND (sourceName IS NULL OR sourceName != "HEALTH_TREE_AI" OR (validated AND isCorrect))
+),
 
- null as visit_detail_id,
- pv.procedure_source_value as procedure_source_value,
- pv.procedure_source_concept_id as procedure_source_concept_id,
- null as modifier_source_value,
+map_pm AS (
+  SELECT
+    concept_code AS mapping_id,
+    concept_id,
+    concept_name,
+    vocabulary_id,
+    concept_class_id,
+    standard_concept
+  FROM ${ref("SNOMED")}
+),
 
- pv.procedure_source_type as procedure_source_type,
- pv.procedure_source_status as procedure_source_status
+r4 AS (
+  SELECT *
+  FROM `healthtree-production.HT_test_sync.apps-curehub-medicalResources-r4-Procedure`
+  WHERE
+    (migratedFromRailsHealthtree = FALSE OR migratedFromRailsHealthtree IS NULL)
+    AND id IN (SELECT DISTINCT medicalResource.id FROM norm)
+),
 
- from
+intermediate AS (
+  SELECT
+    ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS procedure_occurrence_id,
+    norm.user.id AS person_source_value,
+    p.person_id AS person_id,
+    map_pm.concept_id AS procedure_concept_id,
 
- ${ref("procedure_valid")} pv join ${ref("person")} p on pv.person_source_value = p.person_source_value
+    COALESCE(
+      DATE(r4.fhir.performedPeriod.start),
+      DATE(SAFE_CAST(r4.fhir.performedDateTime AS TIMESTAMP)),
+      SAFE_CAST(norm.performedPeriod.start AS DATE),
+      DATE(SAFE_CAST(norm.performedDateTime AS DATE))
+    ) AS procedure_date,
+
+    COALESCE(
+      DATETIME(r4.fhir.performedPeriod.start),
+      DATETIME(SAFE_CAST(r4.fhir.performedDateTime AS TIMESTAMP)),
+      DATETIME(norm.performedPeriod.start),
+      DATETIME(norm.performedDateTime)
+    ) AS procedure_datetime,
+
+    COALESCE(
+      DATE(r4.fhir.performedPeriod.end),
+      DATE(norm.performedPeriod.end)
+    ) AS procedure_end_date,
+
+    COALESCE(
+      DATETIME(r4.fhir.performedPeriod.end),
+      DATETIME(norm.performedPeriod.end)
+    ) AS procedure_end_datetime,
+
+    32817 AS procedure_type_concept_id,
+    0 AS modifier_concept_id,
+    CAST(NULL AS INT64) AS quantity,
+    CAST(NULL AS INT64) AS provider_id,
+
+    r4.fhir.encounter.reference AS visit_occurrence_source_value,
+    vo.visit_occurrence_id AS visit_occurrence_id,
+    CAST(NULL AS INT64) AS visit_detail_id,
+
+    COALESCE(map_pm.concept_name, r4.fhir.code.text) AS procedure_source_value,
+    COALESCE(norm.mapping_id) AS procedure_source_code,
+    map_pm.concept_id AS procedure_source_concept_id,
+    CAST(NULL AS STRING) AS modifier_source_value,
+
+    norm.medicalResource.id AS record_source_id
+
+  FROM norm
+  LEFT JOIN map_pm ON norm.mapping_id = map_pm.mapping_id
+  LEFT JOIN r4 ON norm.medicalResource.id = r4.id
+  LEFT JOIN ${ref("person")} p ON norm.user.id = p.person_source_value
+  LEFT JOIN ${ref("visit_occurrence")} vo ON r4.fhir.encounter.reference = vo.fhir_record_id
+),
+
+-- ✅ no se toca: universo estándar final como hoy
+standard AS (
+  SELECT DISTINCT * FROM intermediate
+),
+
+-- max id del universo estándar (para no colisionar IDs)
+standard_max AS (
+  SELECT COALESCE(MAX(procedure_occurrence_id), 0) AS mx
+  FROM standard
+),
+
+-- ✅ mapeo SNOMED estándar para los artificials
+art_mapped AS (
+  SELECT
+    s.* EXCEPT(procedure_concept_id),
+    COALESCE(c.concept_id, 0) AS procedure_concept_id
+  FROM ${ref("artProc")} s
+  LEFT JOIN `healthtree-production.OMOP.Concept` c
+    ON c.vocabulary_id = 'SNOMED'
+   AND c.domain_id = 'Procedure'
+   AND c.standard_concept = 'S'
+   AND c.concept_code = CAST(s.procedure_source_value_snomed AS STRING)
+),
+
+-- ✅ universo artificial en el MISMO formato de la tabla final
+art_universe AS (
+  SELECT
+    -- IDs nuevos sin cambiar los existentes
+    (standard_max.mx + ROW_NUMBER() OVER (ORDER BY (SELECT NULL))) AS procedure_occurrence_id,
+
+    a.userId AS person_source_value,
+    p.person_id AS person_id,
+
+    a.procedure_concept_id,
+
+    a.procedure_date AS procedure_date,
+    CAST(a.procedure_datetime AS DATETIME) AS procedure_datetime,
+
+    a.lot_end_date AS procedure_end_date,
+    CASE
+      WHEN a.lot_end_date IS NULL THEN NULL
+      ELSE DATETIME(a.lot_end_date)
+    END AS procedure_end_datetime,
+
+    32817 AS procedure_type_concept_id,
+    0 AS modifier_concept_id,
+    CAST(NULL AS INT64) AS quantity,
+    CAST(NULL AS INT64) AS provider_id,
+
+    CAST(NULL AS STRING) AS visit_occurrence_source_value,
+    CAST(NULL AS INT64)  AS visit_occurrence_id,
+    CAST(NULL AS INT64)  AS visit_detail_id,
+
+    -- source fields
+    COALESCE(a.procedure_name, CAST(a.procedure_source_value_snomed AS STRING)) AS procedure_source_value,
+    CAST(a.procedure_source_value_snomed AS STRING) AS procedure_source_code,
+    COALESCE(a.procedure_concept_id, 0) AS procedure_source_concept_id,
+    CAST(NULL AS STRING) AS modifier_source_value,
+
+    -- record_source_id con el mismo estilo que Observations
+    CONCAT(
+      'ART_PROC|',
+      CAST(ABS(FARM_FINGERPRINT(CONCAT(
+        a.userId, '|',
+        a.lineOfTherapyId, '|',
+        CAST(a.procedure_source_value_snomed AS STRING), '|',
+        CAST(a.procedure_date AS STRING), '|',
+        CAST(a.procedure_datetime AS STRING)
+      ))) AS STRING)
+    ) AS record_source_id
+
+  FROM art_mapped a
+  CROSS JOIN standard_max
+  LEFT JOIN ${ref("person")} p
+    ON p.person_source_value = a.userId
+)
+
+-- ✅ resultado final: estándar + artificials (sin modificar el estándar)
+SELECT * FROM standard
+UNION ALL
+SELECT * FROM art_universe

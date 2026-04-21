@@ -1,0 +1,183 @@
+config { type: "table" }
+
+-- ============================================================
+-- EPISODE_EVENT TABLE  (OMOP CDM v5.4)
+-- Links episodes to their underlying clinical event records.
+-- episode_event_field_concept_id identifies the source table:
+--   1147070 – visit_occurrence.visit_occurrence_id
+--   1147082 – procedure_occurrence.procedure_occurrence_id
+--   1147094 – drug_exposure.drug_exposure_id
+--   1147138 – measurement.measurement_id
+--   1147165 – observation.observation_id
+--
+-- Connections per CERTAINTY §3.2.11:
+--  32533 Disease Episode      → measurements & observations at diagnosis
+--  32941 Cancer Drug Treatment → drugs + procedures + meas/obs during LoT
+--  32939 Cancer Surgery        → procedure_occurrence for that surgery
+--  32949 Progression           → observation record for the progression event
+-- ============================================================
+
+-- ── A. LoT (32941) → drug_exposure ───────────────────────────
+-- All drug exposures (FHIR and ART_MED) whose start date falls
+-- within the LoT window for the same person.
+WITH lot_drug AS (
+  SELECT
+    e.episode_id,
+    de.drug_exposure_id AS event_id,
+    1147094             AS episode_event_field_concept_id
+  FROM ${ref("episode")} e
+  JOIN ${ref("drug_exposure_final")} de
+    ON  de.person_id             = e.person_id
+    AND de.drug_exposure_start_date >= e.episode_start_date
+    AND de.drug_exposure_start_date <= COALESCE(e.episode_end_date, CURRENT_DATE())
+  WHERE e.episode_concept_id = 32941
+    AND COALESCE(de.drug_concept_id, 0) != 0
+),
+
+-- ── B. LoT (32941) → procedure_occurrence ────────────────────
+-- Procedures (SCT, CAR-T, etc.) that occurred during the LoT.
+lot_proc AS (
+  SELECT
+    e.episode_id,
+    po.procedure_occurrence_id AS event_id,
+    1147082                    AS episode_event_field_concept_id
+  FROM ${ref("episode")} e
+  JOIN ${ref("procedure_occurrence")} po
+    ON  po.person_id      = e.person_id
+    AND po.procedure_date >= e.episode_start_date
+    AND po.procedure_date <= COALESCE(e.episode_end_date, CURRENT_DATE())
+  WHERE e.episode_concept_id = 32941
+    AND COALESCE(po.procedure_concept_id, 0) != 0
+),
+
+-- ── C. LoT (32941) → measurement at start of LoT ─────────────
+-- Measurements within 30 days after LoT start (baseline labs).
+lot_meas AS (
+  SELECT
+    e.episode_id,
+    m.measurement_id AS event_id,
+    1147138          AS episode_event_field_concept_id
+  FROM ${ref("episode")} e
+  JOIN ${ref("measurement")} m
+    ON  m.person_id        = e.person_id
+    AND m.measurement_date >= e.episode_start_date
+    AND m.measurement_date <= DATE_ADD(e.episode_start_date, INTERVAL 30 DAY)
+  WHERE e.episode_concept_id = 32941
+),
+
+-- ── D. LoT (32941) → observation at start of LoT ─────────────
+lot_obs AS (
+  SELECT
+    e.episode_id,
+    o.observation_id AS event_id,
+    1147165          AS episode_event_field_concept_id
+  FROM ${ref("episode")} e
+  JOIN ${ref("observation")} o
+    ON  o.person_id       = e.person_id
+    AND o.observation_date >= e.episode_start_date
+    AND o.observation_date <= DATE_ADD(e.episode_start_date, INTERVAL 30 DAY)
+  WHERE e.episode_concept_id = 32941
+),
+
+-- ── E. Cancer Surgery (32939) → procedure_occurrence ─────────
+-- Match by person_id and procedure date ≈ surgery episode start.
+surgery_proc AS (
+  SELECT
+    e.episode_id,
+    po.procedure_occurrence_id AS event_id,
+    1147082                    AS episode_event_field_concept_id
+  FROM ${ref("episode")} e
+  JOIN ${ref("procedure_occurrence")} po
+    ON  po.person_id      = e.person_id
+    -- Allow ±3 days for date alignment between ANISH and FHIR records
+    AND po.procedure_date BETWEEN
+          DATE_SUB(e.episode_start_date, INTERVAL 3 DAY)
+      AND DATE_ADD(e.episode_start_date, INTERVAL 3 DAY)
+    AND po.procedure_concept_id = e.episode_object_concept_id
+  WHERE e.episode_concept_id = 32939
+),
+
+-- ── F. Disease Episode (32533) → measurement at diagnosis ─────
+-- Measurements within 30 days of the diagnosis date.
+disease_meas AS (
+  SELECT
+    e.episode_id,
+    m.measurement_id AS event_id,
+    1147138          AS episode_event_field_concept_id
+  FROM ${ref("episode")} e
+  JOIN ${ref("measurement")} m
+    ON  m.person_id        = e.person_id
+    AND m.measurement_date BETWEEN
+          DATE_SUB(e.episode_start_date, INTERVAL 30 DAY)
+      AND DATE_ADD(e.episode_start_date, INTERVAL 30 DAY)
+  WHERE e.episode_concept_id = 32533
+),
+
+-- ── G. Disease Episode (32533) → observation at diagnosis ─────
+disease_obs AS (
+  SELECT
+    e.episode_id,
+    o.observation_id AS event_id,
+    1147165          AS episode_event_field_concept_id
+  FROM ${ref("episode")} e
+  JOIN ${ref("observation")} o
+    ON  o.person_id       = e.person_id
+    AND o.observation_date BETWEEN
+          DATE_SUB(e.episode_start_date, INTERVAL 30 DAY)
+      AND DATE_ADD(e.episode_start_date, INTERVAL 30 DAY)
+  WHERE e.episode_concept_id = 32533
+),
+
+-- ── H. Progression (32949) → observation (the progression event) ─
+-- Exact match on date and concept — links to the ART_OUTCOME observation.
+progression_obs AS (
+  SELECT
+    e.episode_id,
+    o.observation_id AS event_id,
+    1147165          AS episode_event_field_concept_id
+  FROM ${ref("episode")} e
+  JOIN ${ref("observation")} o
+    ON  o.person_id        = e.person_id
+    AND o.observation_date = e.episode_start_date
+    AND o.observation_concept_id = 36305408  -- Disease status (used in outcomeAsObs)
+  WHERE e.episode_concept_id = 32949
+),
+
+-- ── I. Progression (32949) → measurements used for assessment ─
+progression_meas AS (
+  SELECT
+    e.episode_id,
+    m.measurement_id AS event_id,
+    1147138          AS episode_event_field_concept_id
+  FROM ${ref("episode")} e
+  JOIN ${ref("measurement")} m
+    ON  m.person_id        = e.person_id
+    AND m.measurement_date BETWEEN
+          DATE_SUB(e.episode_start_date, INTERVAL 30 DAY)
+      AND e.episode_start_date
+  WHERE e.episode_concept_id = 32949
+)
+
+-- ── Final union — deduplicate in case multiple paths yield the same row ──
+SELECT DISTINCT episode_id, event_id, episode_event_field_concept_id
+FROM (
+  SELECT * FROM lot_drug
+  UNION ALL
+  SELECT * FROM lot_proc
+  UNION ALL
+  SELECT * FROM lot_meas
+  UNION ALL
+  SELECT * FROM lot_obs
+  UNION ALL
+  SELECT * FROM surgery_proc
+  UNION ALL
+  SELECT * FROM disease_meas
+  UNION ALL
+  SELECT * FROM disease_obs
+  UNION ALL
+  SELECT * FROM progression_obs
+  UNION ALL
+  SELECT * FROM progression_meas
+)
+WHERE episode_id IS NOT NULL
+  AND event_id   IS NOT NULL

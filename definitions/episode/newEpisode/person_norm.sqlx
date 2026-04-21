@@ -1,0 +1,7 @@
+config { type: "view" }
+
+SELECT
+  REPLACE(LOWER(CAST(person_source_value AS STRING)), 'patient/', '') AS src_norm,
+  MIN(person_id) AS person_id
+FROM ${ref("person")}
+GROUP BY 1

@@ -1,0 +1,48 @@
+version: 2
+models:
+  - name: omop__cohort_definition
+    description: "Defines patient cohorts by myeloma diagnosis category: Multiple Myeloma (MM),
+      Smoldering Multiple Myeloma (SMM), and Monoclonal Gammopathy of Undetermined Significance
+      (MGUS). Cohort membership is determined by mapping condition occurrences to the
+      seed__myeloma_snomed_classification seed."
+    columns:
+      - name: cohort_definition_id
+        description: Surrogate integer key derived from the myeloma category code (MM, SMM, MGUS).
+        data_type: integer
+        tests:
+          - unique:
+              config:
+                severity: error
+          - not_null
+        constraints:
+          - type: primary_key
+      - name: cohort_definition_name
+        description: Human-readable name of the cohort.
+        data_type: string
+        tests:
+          - not_null
+      - name: cohort_definition_description
+        description: Detailed description of the cohort inclusion criteria.
+        data_type: string
+      - name: definition_type_concept_id
+        description: A foreign key to the predefined Concept in the Standardized Vocabularies
+          reflecting the type of definition.
+        data_type: integer
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: cohort_definition_syntax
+        description: The syntax or text used to define the cohort (optional).
+        data_type: string
+      - name: subject_concept_id
+        description: A foreign key to the Concept describing what the subjects represent
+          (0 = Person).
+        data_type: integer
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: cohort_initiation_date
+        description: The date the cohort definition was first created.
+        data_type: date

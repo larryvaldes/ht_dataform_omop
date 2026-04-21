@@ -1,0 +1,116 @@
+version: 2
+models:
+  - name: omop__death
+    description: 'The death domain contains the clinical event for how and when a Person dies. A person can have up to one record if the source system contains evidence about the Death, such as: Condition in an administrative claim, status of enrollment into a health plan, or explicit record in EHR data.'
+    tests:
+      # Strict: every death record must link to a valid person
+      - person_completeness:
+          arguments:
+            threshold: '100'
+    columns:
+      - name: person_id
+        description: ''
+        data_type: integer
+        tests:
+          - unique:
+              config:
+                severity: error
+          - not_null:
+              config:
+                severity: error
+                tags: ['conformance']
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('omop__person')
+                field: person_id
+        constraints:
+          - type: primary_key
+          - type: foreign_key
+            to: ref('omop__person')
+            to_columns: [person_id]
+      - name: death_date
+        description: The date the person was deceased.
+        data_type: date
+        tests:
+          - not_null
+          - date_not_in_future
+          - outside_observation_period
+      - name: death_datetime
+        description: ''
+        data_type: TIMESTAMP
+      - name: death_type_concept_id
+        description: This is the provenance of the death record, i.e., where it came from. It is possible that an administrative claims database would source death information from a government file so do not assume the Death Type is the same as the Visit Type, etc.
+        data_type: integer
+        tests:
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: death_type_concept_id <> 0
+                to_condition: domain_id = 'Type Concept'
+          - concept_zero_rate:
+              arguments:
+                threshold: '0'
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: death_type_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: cause_concept_id
+        description: This is the Standard Concept representing the Person's cause of death, if available.
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+          # 100% unmapped expected: death cause concepts require manual coding not yet implemented
+          - concept_zero_rate:
+              arguments:
+                threshold: '100'
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: cause_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: cause_source_value
+        description: ''
+        data_type: STRING
+      - name: cause_source_concept_id
+        description: ''
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+          # 100% unmapped expected: death cause source concepts require manual coding not yet implemented
+          - concept_zero_rate:
+              arguments:
+                threshold: '100'
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]

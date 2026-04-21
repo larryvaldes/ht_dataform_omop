@@ -1,0 +1,33 @@
+config {
+    type: "view"
+}
+
+with base as(
+select * from `healthtree-production.HT_test_sync.apps-curehub-medicalResources-r4-Encounter` where fhir is not null and user.id in
+(Select person_source_value from ${ref("allPersons")})
+)
+
+SELECT
+null as visit_occurrence_id,
+user.id as person_source_value,
+id as record_source_id,
+fhir.id as fhir_record_id,
+  null as visit_concept_id,
+  fhir.period.start as visit_start_DATE,
+  null as visit_start_DATETIME,
+  fhir.period.end as visit_end_DATE,
+  null as visit_end_DATETIME,
+  fhir.type[SAFE_OFFSET(0)].text as visit_type_source,
+  null as visit_type_concept_id,
+  fhir.serviceProvider.display as provider_source_value,
+  null as provider_id,
+  fhir.location[SAFE_OFFSET(0)].location.display as care_site_source,
+  null as care_site_id,
+  fhir.class.display as visit_source_value,
+  null as visit_source_concept_id,
+  null as admitting_source_concept_id,
+  COALESCE(fhir.hospitalization.admitSource.text, null) as admitting_source_value,
+  null as discharge_to_concept_id,
+  COALESCE(fhir.hospitalization.dischargeDisposition.text, null) as discharge_to_source_value,
+  null as preceding_visit_occurrence_id
+from base

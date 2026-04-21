@@ -1,0 +1,18 @@
+config { type: "view" }
+
+WITH lp AS (
+  SELECT lb.*,
+         pn.person_id
+  FROM ${ref("lot_base")} lb
+  LEFT JOIN ${ref("person_norm")} pn
+    ON REPLACE(LOWER(CAST(lb.userId AS STRING)), 'patient/', '') = pn.src_norm
+)
+SELECT
+  lp.*,
+  CASE
+    WHEN person_id IS NOT NULL THEN
+      DENSE_RANK() OVER (PARTITION BY person_id ORDER BY COALESCE(startDate, TIMESTAMP('1900-01-01')))
+    ELSE
+      DENSE_RANK() OVER (PARTITION BY userId   ORDER BY COALESCE(startDate, TIMESTAMP('1900-01-01')))
+  END AS episode_number
+FROM lp

@@ -1,0 +1,16 @@
+config {
+    type: "table"
+}
+with base as (
+select cr.concept_id_1 as component_concept_id, component.concept_code as component_code, component.concept_name as component_name,
+cr.concept_id_2 as panel_concept_id, panel.concept_code as panel_code, panel.concept_name as panel_name,
+component.concept_class_id as component_class,
+panel.concept_class_id as panel_class
+
+from `healthtree-production.OMOP.Concept_relationship` cr 
+join `healthtree-production.OMOP.Concept` panel on cr.concept_id_2 = panel.concept_id
+join `healthtree-production.OMOP.Concept` component on cr.concept_id_1 = component.concept_id
+
+where relationship_id like "Contained in panel" and (panel.vocabulary_id like "LOINC" or component.vocabulary_id like "LOINC"))
+
+select * from base 

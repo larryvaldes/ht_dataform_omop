@@ -1,5 +1,5 @@
 config {
-    type: "view"
+    type: "table"
 }
 
 SELECT
@@ -8,3 +8,12 @@ FROM
   `healthtree-production.HT.facilityConnections`
 WHERE
   connectionDetails.automatic.normalizedRecords.count IS NOT NULL and user.name is not null
+/*
+  SELECT distinct userId, passedAway, passedAwayDate from HT.users LEFT JOIN `healthtree-production.HT_test_sync.apps-curehub-medicalResources-r4-Patient` r4Patient ON userId = r4Patient.user.id
+WHERE passedAway AND r4Patient.user.id IS NOT NULL
+*/
+  AND
+  user.name not in (
+    SELECT userId FROM HT.users WHERE (email LIKE '%healthtree.org%' AND email NOT LIKE "jenny@healthtree.org")
+    OR email LIKE '%deleted.com%'
+  )

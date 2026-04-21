@@ -1,0 +1,53 @@
+version: 2
+models:
+  - name: omop__cohort
+    description: "OMOP CDM v5.4 Cohort — assigns patients to diagnosis-based cohorts using the myeloma SNOMED classification seed. Each row represents one person's membership in one cohort, with cohort_start_date as their earliest qualifying diagnosis and cohort_end_date as the end of their observation period."
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          config:
+            severity: error
+          arguments:
+            combination_of_columns:
+              - cohort_definition_id
+              - subject_id
+    columns:
+      - name: cohort_definition_id
+        description: Foreign key to omop__cohort_definition identifying which cohort this membership belongs to.
+        data_type: integer
+        tests:
+          - not_null
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('omop__cohort_definition')
+                field: cohort_definition_id
+        constraints:
+          - type: foreign_key
+            to: ref('omop__cohort_definition')
+            to_columns: [cohort_definition_id]
+      - name: subject_id
+        description: The person_id of the cohort member.
+        data_type: integer
+        tests:
+          - not_null
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('omop__person')
+                field: person_id
+        constraints:
+          - type: foreign_key
+            to: ref('omop__person')
+            to_columns: [person_id]
+      - name: cohort_start_date
+        description: The date the person entered the cohort (earliest qualifying condition occurrence start date).
+        data_type: date
+        tests:
+          - not_null
+      - name: cohort_end_date
+        description: The date the person exited the cohort (observation period end date, or current date if no observation period exists).
+        data_type: date
+        tests:
+          - not_null

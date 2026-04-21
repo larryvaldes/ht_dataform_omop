@@ -1,0 +1,263 @@
+config {
+  type: "view"
+}
+
+SELECT 
+  observation_id,
+  person_id,
+  person_source_value,
+  record_source_id record_source_value,
+  observation_concept_id,
+  observation_DATE,
+  observation_DATETIME,
+  observation_type_concept_id,
+  value_as_number,
+  value_as_string,
+  value_as_concept_id,
+  qualifier_concept_id,
+  unit_concept_id,
+  provider_id,
+  visit_occurrence_id,
+  visit_detail_id,
+  observation_source_value,
+  observation_source_concept_id,
+  unit_source_value,
+  qualifier_source_value,
+  value_source_value,
+  observation_event_id,
+  obs_event_field_concept_id,
+  observation_source_code
+  FROM ${ref("del13q")}
+
+UNION ALL
+
+SELECT
+  observation_id,
+  person_id,
+  person_source_value,
+  record_source_id record_source_value,
+  observation_concept_id,
+  observation_DATE,
+  observation_DATETIME,
+  observation_type_concept_id,
+  value_as_number,
+  value_as_string,
+  value_as_concept_id,
+  qualifier_concept_id,
+  unit_concept_id,
+  provider_id,
+  visit_occurrence_id,
+  visit_detail_id,
+  observation_source_value,
+  observation_source_concept_id,
+  unit_source_value,
+  qualifier_source_value,
+  value_source_value,
+  observation_event_id,
+  obs_event_field_concept_id,
+  observation_source_code
+  FROM ${ref("del17p")}
+
+UNION ALL
+
+SELECT
+  observation_id,
+  person_id,
+  person_source_value,
+  record_source_id record_source_value,
+  observation_concept_id,
+  observation_DATE,
+  observation_DATETIME,
+  observation_type_concept_id,
+  value_as_number,
+  value_as_string,
+  value_as_concept_id,
+  qualifier_concept_id,
+  unit_concept_id,
+  provider_id,
+  visit_occurrence_id,
+  visit_detail_id,
+  observation_source_value,
+  observation_source_concept_id,
+  unit_source_value,
+  qualifier_source_value,
+  value_source_value,
+  observation_event_id,
+  obs_event_field_concept_id,
+  observation_source_code
+  FROM ${ref("ecog_fix")}
+
+UNION ALL
+
+SELECT
+  observation_id,
+  person_id,
+  person_source_value,
+  record_source_id record_source_value,
+  observation_concept_id,
+  observation_DATE,
+  observation_DATETIME,
+  observation_type_concept_id,
+  value_as_number,
+  value_as_string,
+  value_as_concept_id,
+  qualifier_concept_id,
+  unit_concept_id,
+  provider_id,
+  visit_occurrence_id,
+  visit_detail_id,
+  observation_source_value,
+  observation_source_concept_id,
+  unit_source_value,
+  qualifier_source_value,
+  value_source_value,
+  observation_event_id,
+  obs_event_field_concept_id,
+  observation_source_code
+  FROM ${ref("hyperdiploidy")}
+
+UNION ALL
+
+SELECT
+  observation_id,
+  person_id,
+  person_source_value,
+  record_source_id record_source_value,
+  observation_concept_id,
+  observation_DATE,
+  observation_DATETIME,
+  observation_type_concept_id,
+  value_as_number,
+  value_as_string,
+  value_as_concept_id,
+  qualifier_concept_id,
+  unit_concept_id,
+  provider_id,
+  visit_occurrence_id,
+  visit_detail_id,
+  observation_source_value,
+  observation_source_concept_id,
+  unit_source_value,
+  qualifier_source_value,
+  value_source_value,
+  observation_event_id,
+  obs_event_field_concept_id,
+  observation_source_code
+  FROM ${ref("hypodiploidy")}
+
+UNION ALL
+
+SELECT
+  observation_id,
+  person_id,
+  person_source_value,
+  record_source_id record_source_value,
+  observation_concept_id,
+  observation_DATE,
+  observation_DATETIME,
+  observation_type_concept_id,
+  value_as_number,
+  value_as_string,
+  value_as_concept_id,
+  qualifier_concept_id,
+  unit_concept_id,
+  provider_id,
+  visit_occurrence_id,
+  visit_detail_id,
+  observation_source_value,
+  observation_source_concept_id,
+  unit_source_value,
+  qualifier_source_value,
+  value_source_value,
+  observation_event_id,
+  obs_event_field_concept_id,
+  observation_source_code
+  FROM ${ref("t_14_16")}
+
+UNION ALL
+
+SELECT
+  observation_id,
+  person_id,
+  person_source_value,
+  record_source_id record_source_value,
+  observation_concept_id,
+  observation_DATE,
+  observation_DATETIME,
+  observation_type_concept_id,
+  value_as_number,
+  value_as_string,
+  value_as_concept_id,
+  qualifier_concept_id,
+  unit_concept_id,
+  provider_id,
+  visit_occurrence_id,
+  visit_detail_id,
+  observation_source_value,
+  observation_source_concept_id,
+  unit_source_value,
+  qualifier_source_value,
+  value_source_value,
+  observation_event_id,
+  obs_event_field_concept_id,
+  observation_source_code
+  FROM ${ref("t_4_14")}
+
+UNION ALL
+
+SELECT
+  observation_id,
+  person_id,
+  person_source_value,
+  record_source_id record_source_value,
+  observation_concept_id,
+  observation_DATE,
+  observation_DATETIME,
+  observation_type_concept_id,
+  value_as_number,
+  value_as_string,
+  value_as_concept_id,
+  qualifier_concept_id,
+  unit_concept_id,
+  provider_id,
+  visit_occurrence_id,
+  visit_detail_id,
+  observation_source_value,
+  observation_source_concept_id,
+  unit_source_value,
+  qualifier_source_value,
+  value_source_value,
+  observation_event_id,
+  obs_event_field_concept_id,
+  observation_source_code
+  FROM ${ref("t_6_14")}
+
+UNION ALL
+
+SELECT
+  observation_id,
+  person_id,
+  person_source_value,
+  record_source_id record_source_value,
+  observation_concept_id,
+  observation_DATE,
+  observation_DATETIME,
+  observation_type_concept_id,
+  value_as_number,
+  value_as_string,
+  value_as_concept_id,
+  qualifier_concept_id,
+  unit_concept_id,
+  provider_id,
+  visit_occurrence_id,
+  visit_detail_id,
+  observation_source_value,
+  observation_source_concept_id,
+  unit_source_value,
+  qualifier_source_value,
+  value_source_value,
+  observation_event_id,
+  obs_event_field_concept_id,
+  observation_source_code
+  FROM ${ref("iss")}
+  

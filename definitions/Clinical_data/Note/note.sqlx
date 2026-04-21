@@ -15,7 +15,7 @@ WITH
   FROM
     ${ref("drug_exposure")} de
   JOIN
-    healthtree-production.HT.MedicationRequest mr
+    `healthtree-production.HT_test_sync.apps-curehub-medicalResources-r4-MedicationRequest` mr
   ON
     de.record_source_id = mr.fhir.id
   WHERE
@@ -29,15 +29,15 @@ WITH
     "Measurement" AS note_source_origin,
     me.visit_occurrence_id,
     me.measurement_DATE,
-    o.fhir.note[SAFE_OFFSET(0)].entity.text AS note_text
+    o.fhir.note[SAFE_OFFSET(0)].text AS note_text
   FROM
     ${ref("measurement")} me
   JOIN
-    healthtree-production.HT.Observation o
+    `healthtree-production.HT_test_sync.apps-curehub-medicalResources-r4-Observation` o
   ON
     me.record_source_id = o.fhir.id
   WHERE
-    o.fhir.note[SAFE_OFFSET(0)].entity.text IS NOT NULL ),
+    o.fhir.note[SAFE_OFFSET(0)].text IS NOT NULL ),
 
 
   observation_base AS(
@@ -58,7 +58,7 @@ WITH
   WHERE
     obs.fhir.note[SAFE_OFFSET(0)].entity.text IS NOT NULL ),
 
-
+/*
   condition_occurrence_base AS (
   SELECT
     DISTINCT co.person_source_value,
@@ -71,11 +71,12 @@ WITH
   FROM
     ${ref("condition_occurrence")} co
   JOIN
-    healthtree-production.HT.Condition con
+    `healthtree-production.HT_test_sync.apps-curehub-medicalResources-r4-Condition` con
   ON
     co.record_source_id = con.fhir.id
   WHERE
     con.fhir.notes IS NOT NULL ),
+    */
 
   device_exposure_base AS (
   SELECT
@@ -107,7 +108,7 @@ WITH
   FROM
     ${ref("procedure_occurrence")} po
   JOIN
-    healthtree-production.HT.Procedure proc
+    `healthtree-production.HT_test_sync.apps-curehub-medicalResources-r4-Procedure` proc
   ON
     po.record_source_id = proc.fhir.id
   WHERE
@@ -141,8 +142,8 @@ FROM
   Select * FROM measurement_base
   UNION ALL
   SELECT * FROM observation_base
-  UNION ALL
-  SELECT * FROM condition_occurrence_base
+  --UNION ALL
+  --SELECT * FROM condition_occurrence_base
   UNION ALL 
   SELECT * FROM procedure_base
   UNION ALL

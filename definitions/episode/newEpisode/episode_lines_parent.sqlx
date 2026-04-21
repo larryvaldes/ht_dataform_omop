@@ -1,0 +1,30 @@
+config { type: "view" }
+
+-- Maps diseaseId (ANISH GUID) → standard SNOMED concept for the neoplasm.
+-- These GUIDs match ANISH.linesOfTherapy.diseaseId.
+WITH disease_map AS (
+  SELECT 'GxAhXAnh3drV4xY5Vf3A' AS diseaseId, 437233  AS disease_snomed  UNION ALL -- Multiple Myeloma
+  SELECT 'WCJo8IouncjDW6exT1YS',              140352                      UNION ALL -- MDS
+  SELECT 'EkjGB5kileTKP2vnTWhV',              4147411                     UNION ALL -- AML
+  SELECT 'WNjIFmDibXhTFneCh4dG',              133169                      UNION ALL -- CML
+  SELECT 't8f3E99OdM9XZe1d1ASM',              138994                      UNION ALL -- NHL
+  SELECT 'eBIxYtdHAYhTTs5L9bcC',              432574                                -- CLL
+)
+SELECT
+  lineId,
+  lineOfTherapyId,
+  person_id,
+  episode_number,
+  32941                                       AS episode_concept_id,       -- Cancer Drug Treatment
+  CAST(NULL AS INT64)                         AS episode_parent_id,
+  COALESCE(dm.disease_snomed, 437233)         AS episode_object_concept_id,
+  DATE(startDate)                                                         AS episode_start_date,
+  startDate                                                               AS episode_start_datetime,
+  -- Nullify end date when it precedes start (bad source data, not a timezone issue)
+  DATE(CASE WHEN endDate < startDate THEN NULL ELSE endDate END)          AS episode_end_date,
+  CASE WHEN endDate < startDate THEN NULL ELSE endDate END                AS episode_end_datetime,
+  userId,
+  diseaseId,
+  diseaseName
+FROM ${ref("lot_with_person_and_number")} lwp
+LEFT JOIN disease_map dm USING (diseaseId)

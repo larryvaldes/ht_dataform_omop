@@ -1,0 +1,206 @@
+version: 2
+
+models:
+  - name: omop__note
+    description: >
+      OMOP CDM v5.4 Note table — clinical notes and narrative text from FHIR
+      DocumentReference resources. Each row represents a clinical note with its
+      type classification, content reference, and linkage to visits and providers.
+    tests:
+      - person_completeness:
+          arguments:
+            threshold: '95'
+    columns:
+      - name: note_id
+        description: The unique key given to a Note record for a Person. Refer to the ETL for how duplicate notes during the same Visit were handled.
+        data_type: integer
+        tests:
+          - unique:
+              config:
+                severity: error
+          - not_null:
+              config:
+                severity: error
+                tags: ['conformance']
+        constraints:
+          - type: primary_key
+      - name: person_id
+        description: The PERSON_ID of the Person for whom the note is recorded.
+        data_type: integer
+        tests:
+          - not_null
+          - relationships:
+              config:
+                severity: error
+              arguments:
+                to: ref('omop__person')
+                field: person_id
+        constraints:
+          - type: foreign_key
+            to: ref('omop__person')
+            to_columns: [person_id]
+      - name: note_date
+        description: The date the note was recorded.
+        data_type: date
+        tests:
+          - not_null
+          - date_not_in_future
+          - outside_observation_period
+      - name: note_datetime
+        description: The datetime the note was recorded with time component.
+        data_type: TIMESTAMP
+      - name: note_type_concept_id
+        description: This field can be used to determine the provenance of the Note record, as in whether the note was from an EHR system, patient self-report, or other sources.
+        data_type: integer
+        tests:
+          - not_null
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: note_type_concept_id <> 0
+                to_condition: domain_id = 'Type Concept'
+          - concept_zero_rate:
+              arguments:
+                threshold: '0'
+          - dbt_utils.relationships_where:
+              config:
+                severity: error
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: note_type_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: note_class_concept_id
+        description: >
+          Clinical note class from LOINC document types (e.g., Progress note,
+          History and physical note, Surgical operation note). 0 if unmapped.
+        data_type: integer
+        tests:
+          - not_null
+          - dbt_utils.relationships_where:
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: note_class_concept_id <> 0
+          - dbt_utils.relationships_where:
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: note_class_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+          - concept_zero_rate:
+              arguments:
+                threshold: '16'
+          - concept_mapping_rate:
+              config:
+                severity: warn
+              arguments:
+                min_rate: 50
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: note_title
+        description: Display title of the note from FHIR DocumentReference.type.text.
+        data_type: STRING
+      - name: note_text
+        description: >
+          Content URL reference to the note binary. Actual text content is stored
+          in external Binary resources referenced by this URL.
+        data_type: STRING
+      - name: encoding_concept_id
+        description: Text encoding concept (32678 = UTF-8).
+        data_type: integer
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: language_concept_id
+        description: Language concept (4180186 = English).
+        data_type: integer
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: provider_id
+        description: The provider associated with the note, e.g. the note author.
+        data_type: integer
+        tests:
+          - relationships:
+              arguments:
+                to: ref('omop__provider')
+                field: provider_id
+          - fk_null_rate:
+              config:
+                severity: warn
+              arguments:
+                threshold: 64
+        constraints:
+          - type: foreign_key
+            to: ref('omop__provider')
+            to_columns: [provider_id]
+      - name: visit_occurrence_id
+        description: The visit during which the note was recorded.
+        data_type: integer
+        tests:
+          - relationships:
+              arguments:
+                to: ref('omop__visit_occurrence')
+                field: visit_occurrence_id
+          - fk_null_rate:
+              config:
+                severity: warn
+              arguments:
+                threshold: 14
+        constraints:
+          - type: foreign_key
+            to: ref('omop__visit_occurrence')
+            to_columns: [visit_occurrence_id]
+      - name: visit_detail_id
+        description: The VISIT_DETAIL record during which the note was recorded.
+        data_type: integer
+        constraints:
+          - type: foreign_key
+            to: ref('omop__visit_detail')
+            to_columns: [visit_detail_id]
+      - name: note_source_value
+        description: This field houses the verbatim value from the source data representing the type of note (LOINC code or type text from DocumentReference.type).
+        data_type: STRING
+        tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: note_event_id
+        description: If the Note record is related to another record in the database, this field is the primary key of the linked record.
+        data_type: integer
+      - name: note_event_field_concept_id
+        description: If the Note record is related to another record in the database, this field is the CONCEPT_ID that identifies which table the primary key of the linked record came from.
+        data_type: integer
+        tests:
+          - relationships:
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]

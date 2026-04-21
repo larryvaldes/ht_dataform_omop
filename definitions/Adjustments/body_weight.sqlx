@@ -1,0 +1,30 @@
+config {
+  type: "table"
+}
+
+SELECT 
+3025315 AS measurement_concept_id,
+
+  CASE
+    -- kilogramos: kg, k g, k.g, k.g., kg., kilogram(s), kilo gram(s), kgs
+    WHEN REGEXP_CONTAINS(LOWER(TRIM(unit_source_value)),
+         r'^(?:k\s*\.?\s*g\.?|kg\.?|k\.g\.?|kilogram(?:s)?|kilo\s*gram(?:s)?|kgs?\.?)$')
+      THEN 9529
+    -- gramos: g, gram(s), gr.
+    WHEN REGEXP_CONTAINS(LOWER(TRIM(unit_source_value)),
+         r'^(?:g\.?|gram(?:s)?|gr\.?)$')
+      THEN 8504
+    -- libras: lb, lbs, pound, pounds (case insensitive)
+    WHEN REGEXP_CONTAINS(LOWER(TRIM(unit_source_value)),
+         r'^(?:lb\.?|lbs?\.?|pound(?:s)?)$')
+      THEN 8739
+    ELSE NULL
+  END AS unit_concept_id,
+  
+  4172703 AS operator_concept_id,
+
+* EXCEPT(unit_concept_id, measurement_concept_id, operator_concept_id)
+FROM ${ref("measurement_semi")}
+WHERE measurement_source_code like "29463-7"
+OR measurement_source_code like "3141-9"
+OR measurement_source_code like "3142-7"

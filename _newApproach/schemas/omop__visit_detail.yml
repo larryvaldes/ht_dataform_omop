@@ -1,0 +1,250 @@
+version: 2
+
+models:
+  - name: omop__visit_detail
+    description: >
+      OMOP CDM v5.4 Visit Detail table — sub-encounters (FHIR Encounter.partOf)
+      representing granular visit components like surgery cases within a parent
+      hospital visit. Linked to omop__visit_occurrence via visit_occurrence_id.
+    columns:
+      - name: visit_detail_id
+        description: Use this to identify unique interactions between a person and the health care system at a more granular level than visit_occurrence.
+        data_type: integer
+        tests:
+          - unique:
+              config:
+                severity: error
+          - not_null:
+              config:
+                severity: error
+                tags: ['conformance']
+        constraints:
+          - type: primary_key
+      - name: person_id
+        description: The PERSON_ID of the Person for whom the visit detail is recorded.
+        data_type: integer
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('omop__person')
+                field: person_id
+        constraints:
+          - type: foreign_key
+            to: ref('omop__person')
+            to_columns: [person_id]
+      - name: visit_detail_concept_id
+        description: This field contains a concept id representing the kind of visit detail, like inpatient or outpatient. All concepts in this field should be standard and belong to the Visit domain.
+        data_type: integer
+        tests:
+          - not_null
+          - dbt_utils.relationships_where:
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: visit_detail_concept_id <> 0
+                to_condition: domain_id = 'Visit'
+          - concept_zero_rate:
+              arguments:
+                threshold: '0'
+          - dbt_utils.relationships_where:
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: visit_detail_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: visit_detail_start_date
+        description: The start date of the visit detail (e.g., surgery start).
+        data_type: date
+        tests:
+          - not_null
+          - date_not_in_future:
+              config:
+                severity: warn
+          - date_not_after:
+              config:
+                severity: warn
+              arguments:
+                after_column: visit_detail_end_date
+          - outside_observation_period:
+              config:
+                severity: warn
+      - name: visit_detail_start_datetime
+        description: The start datetime of the visit detail.
+        data_type: TIMESTAMP
+      - name: visit_detail_end_date
+        description: The end date of the visit detail (e.g., surgery end).
+        data_type: date
+        tests:
+          - not_null
+      - name: visit_detail_end_datetime
+        description: The end datetime of the visit detail.
+        data_type: TIMESTAMP
+      - name: visit_detail_type_concept_id
+        description: Use this field to understand the provenance of the visit detail record, or where the record comes from.
+        data_type: integer
+        tests:
+          - not_null
+          - dbt_utils.relationships_where:
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: visit_detail_type_concept_id <> 0
+                to_condition: domain_id = 'Type Concept'
+          - concept_zero_rate:
+              arguments:
+                threshold: '0'
+          - dbt_utils.relationships_where:
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: visit_detail_type_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: provider_id
+        description: There will only be one provider per visit detail record.
+        data_type: integer
+        tests:
+          - relationships:
+              arguments:
+                to: ref('omop__provider')
+                field: provider_id
+          - fk_null_rate:
+              config:
+                severity: warn
+              arguments:
+                threshold: 63
+        constraints:
+          - type: foreign_key
+            to: ref('omop__provider')
+            to_columns: [provider_id]
+      - name: care_site_id
+        description: This field provides information about the Care Site where the Visit Detail took place.
+        data_type: integer
+        tests:
+          - relationships:
+              arguments:
+                to: ref('omop__care_site')
+                field: care_site_id
+          - fk_null_rate:
+              config:
+                severity: warn
+              arguments:
+                threshold: 73
+        constraints:
+          - type: foreign_key
+            to: ref('omop__care_site')
+            to_columns: [care_site_id]
+      - name: visit_detail_source_value
+        description: This field houses the verbatim value from the source data representing the kind of visit detail that took place (encounter class code and display).
+        data_type: STRING
+      - name: visit_detail_source_concept_id
+        description: ''
+        data_type: integer
+        tests:
+          - relationships:
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+          - concept_zero_rate:
+              # 100% unmapped expected: visit detail source concepts not mapped to standard vocabulary
+              arguments:
+                threshold: '100'
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: admitted_from_concept_id
+        description: Use this field to determine where the patient was admitted from for this visit detail.
+        data_type: integer
+        tests:
+          - dbt_utils.relationships_where:
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: admitted_from_concept_id <> 0
+                to_condition: domain_id = 'Visit'
+          - concept_zero_rate:
+              arguments:
+                threshold: '40'
+          - dbt_utils.relationships_where:
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: admitted_from_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: admitted_from_source_value
+        description: ''
+        data_type: STRING
+      - name: discharged_to_concept_id
+        description: Use this field to determine where the patient was discharged to after this visit detail.
+        data_type: integer
+        tests:
+          - dbt_utils.relationships_where:
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: discharged_to_concept_id <> 0
+                to_condition: domain_id = 'Visit'
+          - concept_zero_rate:
+              arguments:
+                threshold: '40'
+          - dbt_utils.relationships_where:
+              arguments:
+                to: ref('stg_raw_athena__concept')
+                field: concept_id
+                from_condition: discharged_to_concept_id != 0
+                to_condition: standard_concept = 'S' AND invalid_reason IS NULL
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: discharged_to_source_value
+        description: ''
+        data_type: STRING
+      - name: preceding_visit_detail_id
+        description: Use this field to find the visit detail that occurred for the person prior to the given visit detail within the same parent visit.
+        data_type: integer
+        tests:
+          - relationships:
+              arguments:
+                to: ref('omop__visit_detail')
+                field: visit_detail_id
+          - fk_null_rate:
+              config:
+                severity: warn
+              arguments:
+                threshold: 40
+      - name: parent_visit_detail_id
+        description: Use this field to find the parent visit detail for nested sub-visits.
+        data_type: integer
+      - name: visit_occurrence_id
+        description: The parent visit_occurrence this visit detail belongs to.
+        data_type: integer
+        tests:
+          - relationships:
+              config:
+                where: "visit_occurrence_id is not null"
+              arguments:
+                to: ref('omop__visit_occurrence')
+                field: visit_occurrence_id
+          - fk_null_rate:
+              config:
+                severity: warn
+              arguments:
+                threshold: 9
+        constraints:
+          - type: foreign_key
+            to: ref('omop__visit_occurrence')
+            to_columns: [visit_occurrence_id]

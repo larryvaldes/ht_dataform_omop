@@ -1,0 +1,134 @@
+/*
+config {
+  type: "table"
+}
+
+SELECT *
+FROM UNNEST([
+  STRUCT(
+    CAST(NULL AS INT64) AS drug_era_id,
+    CAST(NULL AS INT64) AS person_id,
+    CAST(NULL AS INT64) AS drug_concept_id,
+    CAST(NULL AS DATE) AS drug_era_start_date,
+    CAST(NULL AS DATE) AS drug_era_end_date,
+    CAST(NULL AS INT64) AS drug_exposure_count,
+    CAST(NULL AS INT64) AS gap_days
+  )
+])
+WHERE FALSE
+
+*/
+
+config {
+  type: "table"
+}
+
+-- Parámetros mínimos (puedes cambiar gap_days)
+WITH params AS (
+  SELECT 30 AS gap_days
+),
+
+-- 1) Base: toma exposiciones válidas
+base AS (
+  SELECT
+    de.person_id,
+    de.drug_concept_id,
+    de.drug_exposure_start_date AS start_date,
+    -- Fin de exposición: end_date, o start + days_supply - 1, o start si no hay nada
+    COALESCE(
+      de.drug_exposure_end_date,
+      DATE_ADD(de.drug_exposure_start_date, INTERVAL COALESCE(de.days_supply, 1) - 1 DAY),
+      de.drug_exposure_start_date
+    ) AS end_date
+  FROM ${ref("drug_exposure")} de
+  WHERE de.person_id IS NOT NULL
+    AND de.drug_concept_id IS NOT NULL
+    AND de.drug_concept_id != 0
+),
+
+-- 2) Normaliza casos raros (fin antes que inicio → fuerza fin = inicio)
+norm AS (
+  SELECT
+    person_id,
+    drug_concept_id,
+    start_date,
+    CASE
+      WHEN end_date < start_date THEN start_date
+      ELSE end_date
+    END AS end_date
+  FROM base
+),
+
+-- 3) Ordena y calcula el "fin acumulado" (running max del fin)
+ordered AS (
+  SELECT
+    n.*,
+    MAX(n.end_date) OVER (
+      PARTITION BY n.person_id, n.drug_concept_id
+      ORDER BY n.start_date
+      ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    ) AS running_end_date
+  FROM norm n
+),
+
+-- 4) Señala inicio de nueva era si hay un hueco mayor al gap permitido
+marks AS (
+  SELECT
+    o.*,
+    LAG(o.running_end_date) OVER (
+      PARTITION BY o.person_id, o.drug_concept_id
+      ORDER BY o.start_date
+    ) AS prev_running_end,
+    (SELECT gap_days FROM params) AS gap_days
+  FROM ordered o
+),
+
+-- 5) Etiqueta de era (acumulando “resets”)
+tagged AS (
+  SELECT
+    m.*,
+    CASE
+      WHEN m.prev_running_end IS NULL
+        OR m.start_date > DATE_ADD(m.prev_running_end, INTERVAL m.gap_days DAY)
+      THEN 1 ELSE 0
+    END AS new_era_flag
+  FROM marks m
+),
+
+era_groups AS (
+  SELECT
+    t.*,
+    -- Suma acumulada para numerar eras dentro de cada (persona, concepto)
+    SUM(new_era_flag) OVER (
+      PARTITION BY t.person_id, t.drug_concept_id
+      ORDER BY t.start_date
+      ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    ) AS era_seq
+  FROM tagged t
+),
+
+-- 6) Agrega por era: min start, max end, conteo de exposiciones
+eras AS (
+  SELECT
+    person_id,
+    drug_concept_id,
+    era_seq,
+    MIN(start_date) AS drug_era_start_date,
+    MAX(end_date)   AS drug_era_end_date,
+    COUNT(*)        AS drug_exposure_count,
+    MAX(gap_days)   AS gap_days_used
+  FROM era_groups
+  GROUP BY person_id, drug_concept_id, era_seq
+)
+
+-- 7) Salida final (con id estable y no nulo)
+SELECT
+ROW_NUMBER() OVER (ORDER BY person_id, drug_concept_id, drug_era_start_date, drug_era_end_date) AS drug_era_id,
+  person_id,
+  drug_concept_id,
+  drug_era_start_date,
+  drug_era_end_date,
+  drug_exposure_count,
+  gap_days_used AS gap_days
+FROM eras
+WHERE drug_era_start_date IS NOT NULL

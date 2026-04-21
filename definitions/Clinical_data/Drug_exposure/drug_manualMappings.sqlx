@@ -1,0 +1,33 @@
+config {
+  type: "table"
+}
+
+SELECT 
+  drug_name,
+  concept_id
+FROM UNNEST([
+  STRUCT('lenalidomide' AS drug_name, 19026972 AS concept_id),
+  STRUCT('carfilzomib', 42873638),
+  STRUCT('cyclophosphamide', 1310317),
+  STRUCT('pomalidomide', 43014237),
+  STRUCT('bortezomib', 1336825),
+  STRUCT('daratumumab', 35605744),
+  STRUCT('thalidomide', 19137042),
+  STRUCT('iberdomide', 36854679),
+  STRUCT('mezigdomide', 36859146),
+  STRUCT('ixazomib', 35606214),
+  STRUCT('elotuzumab', 35604032),
+  STRUCT('ixatuzimab', 37498969),
+  STRUCT('talquetamab', 746340),
+  STRUCT('teclistamab', 741578),
+  STRUCT('elranatamab', 746391),
+  STRUCT('selinexor', 1361191),
+  STRUCT('venetoclax', 35604205),
+  STRUCT('melphalan', 1301267),
+  STRUCT('bendamustine', 19015523),
+  STRUCT('idarubicin', 19078097),
+  STRUCT('etoposide', 1350504),
+  STRUCT('cisplatin', 1397599),
+  STRUCT('doxorubicin', 1338512),
+  STRUCT('fludarabine', 1395557)
+])

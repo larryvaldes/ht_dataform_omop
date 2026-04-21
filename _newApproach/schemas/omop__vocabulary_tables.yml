@@ -1,0 +1,364 @@
+version: 2
+
+# ============================================================================
+# OMOP CDM v5.4 — Standardized Vocabularies
+#
+# These views publish the OHDSI Athena vocabulary tables into the omop schema.
+# They are pass-through projections from the staging layer with no transformation.
+# ============================================================================
+
+models:
+  - name: omop__concept
+    description: >
+      OMOP CDM v5.4 Concept table — the central vocabulary table containing every
+      clinical concept across all OHDSI vocabularies (SNOMED CT, ICD-10-CM, RxNorm,
+      LOINC, CPT4, UCUM, etc.).
+    columns:
+      - name: concept_id
+        description: Unique integer identifier for the concept within the OMOP vocabulary.
+        data_type: integer
+        data_tests:
+          - unique
+        constraints:
+          - type: primary_key
+      - name: concept_name
+        description: Human-readable name for the concept.
+        data_type: STRING
+      - name: domain_id
+        description: The OMOP domain this concept belongs to (Condition, Drug, Procedure, Measurement, etc.).
+        data_type: STRING
+        data_tests:
+          - not_null
+      - name: vocabulary_id
+        description: The vocabulary this concept belongs to (e.g., SNOMED, RxNorm, LOINC).
+        data_type: STRING
+        data_tests:
+          - not_null
+      - name: concept_class_id
+        description: Sub-classification within the vocabulary.
+        data_type: STRING
+      - name: standard_concept
+        description: "'S' = Standard, 'C' = Classification, NULL = Non-standard."
+        data_type: STRING
+      - name: concept_code
+        description: The code as it appears in the source vocabulary.
+        data_type: STRING
+        data_tests:
+          - not_null
+      - name: valid_start_date
+        description: Date from which this concept is valid.
+        data_type: date
+      - name: valid_end_date
+        description: Date after which this concept is no longer valid.
+        data_type: date
+      - name: invalid_reason
+        description: "'U' = upgraded/replaced, 'D' = deleted, NULL = currently valid."
+        data_type: STRING
+
+  - name: omop__concept_ancestor
+    description: >
+      OMOP CDM v5.4 Concept Ancestor table — pre-computed transitive closure of
+      hierarchical relationships between standard concepts.
+    columns:
+      - name: ancestor_concept_id
+        description: The higher-level (more general) concept in the hierarchy.
+        data_type: integer
+        data_tests:
+          - not_null
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: descendant_concept_id
+        description: The lower-level (more specific) concept in the hierarchy.
+        data_type: integer
+        data_tests:
+          - not_null
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: min_levels_of_separation
+        description: Minimum number of hierarchical steps between ancestor and descendant.
+        data_type: integer
+      - name: max_levels_of_separation
+        description: Maximum number of hierarchical steps between ancestor and descendant.
+        data_type: integer
+
+  - name: omop__concept_class
+    description: >
+      OMOP CDM v5.4 Concept Class table — sub-classifications within vocabularies.
+    columns:
+      - name: concept_class_id
+        description: Short identifier for the concept class.
+        data_type: STRING
+        data_tests:
+          - unique
+      - name: concept_class_name
+        description: Human-readable name for the concept class.
+        data_type: STRING
+      - name: concept_class_concept_id
+        description: Self-referencing concept_id for this concept class entry.
+        data_type: integer
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+
+  - name: omop__concept_relationship
+    description: >
+      OMOP CDM v5.4 Concept Relationship table — directed relationships between
+      concepts, including "Maps to" for standard concept mapping.
+    columns:
+      - name: concept_id_1
+        description: Source concept in the relationship.
+        data_type: integer
+        data_tests:
+          - not_null
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: concept_id_2
+        description: Target concept in the relationship.
+        data_type: integer
+        data_tests:
+          - not_null
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: relationship_id
+        description: Type of relationship (e.g., "Maps to", "Is a").
+        data_type: STRING
+        data_tests:
+          - not_null
+      - name: valid_start_date
+        description: Date from which this relationship is valid.
+        data_type: date
+      - name: valid_end_date
+        description: Date after which this relationship is no longer valid.
+        data_type: date
+      - name: invalid_reason
+        description: NULL if active, 'D' if deleted.
+        data_type: STRING
+
+  - name: omop__concept_synonym
+    description: >
+      OMOP CDM v5.4 Concept Synonym table — alternative names for concepts across languages.
+    columns:
+      - name: concept_id
+        description: The concept this synonym belongs to.
+        data_type: integer
+        data_tests:
+          - not_null
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: concept_synonym_name
+        description: Alternative name or translation for the concept.
+        data_type: STRING
+      - name: language_concept_id
+        description: Language of the synonym (concept_id referencing a language concept).
+        data_type: integer
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+
+  - name: omop__domain
+    description: >
+      OMOP CDM v5.4 Domain table — lists all clinical domains that determine which
+      OMOP table a concept populates.
+    columns:
+      - name: domain_id
+        description: Short identifier for the domain (e.g., Condition, Drug, Measurement).
+        data_type: STRING
+        data_tests:
+          - unique
+      - name: domain_name
+        description: Human-readable name for the domain.
+        data_type: STRING
+      - name: domain_concept_id
+        description: Self-referencing concept_id for this domain entry.
+        data_type: integer
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+
+  - name: omop__drug_strength
+    description: >
+      OMOP CDM v5.4 Drug Strength table — ingredient-level dosage information for drug concepts.
+    columns:
+      - name: drug_concept_id
+        description: The drug product concept.
+        data_type: integer
+        data_tests:
+          - not_null
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: ingredient_concept_id
+        description: The active ingredient concept.
+        data_type: integer
+        data_tests:
+          - not_null
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: amount_value
+        description: Fixed amount of ingredient per unit (for solid dose forms).
+        data_type: FLOAT64
+      - name: amount_unit_concept_id
+        description: Unit for amount_value.
+        data_type: integer
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: numerator_value
+        description: Numerator for concentration (for liquid dose forms).
+        data_type: FLOAT64
+      - name: numerator_unit_concept_id
+        description: Unit for numerator_value.
+        data_type: integer
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: denominator_value
+        description: Denominator for concentration.
+        data_type: FLOAT64
+      - name: denominator_unit_concept_id
+        description: Unit for denominator_value.
+        data_type: integer
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: box_size
+        description: Number of units in a box (if applicable).
+        data_type: integer
+      - name: valid_start_date
+        description: Date from which this strength record is valid.
+        data_type: date
+      - name: valid_end_date
+        description: Date after which this strength record is no longer valid.
+        data_type: date
+      - name: invalid_reason
+        description: NULL if active.
+        data_type: STRING
+
+  - name: omop__relationship
+    description: >
+      OMOP CDM v5.4 Relationship table — metadata about relationship types used in concept_relationship.
+    columns:
+      - name: relationship_id
+        description: Short identifier for the relationship type.
+        data_type: STRING
+        data_tests:
+          - unique
+      - name: relationship_name
+        description: Human-readable name for the relationship.
+        data_type: STRING
+      - name: is_hierarchical
+        description: "'1' if this relationship defines a hierarchy."
+        data_type: STRING
+      - name: defines_ancestry
+        description: "'1' if this relationship is used to compute concept_ancestor."
+        data_type: STRING
+      - name: reverse_relationship_id
+        description: The inverse relationship.
+        data_type: STRING
+      - name: relationship_concept_id
+        description: Self-referencing concept_id for this relationship entry.
+        data_type: integer
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+
+  - name: omop__source_to_concept_map
+    description: >
+      OMOP CDM v5.4 source_to_concept_map — maps non-standard source codes
+      (HL7 race, ethnicity, gender) to OMOP standard concepts. Sourced from
+      map__hl7_omop which unions all HL7 demographic mapping tables. Expand
+      by adding new mapping tables as union-all members in map__hl7_omop.
+    columns:
+      - name: source_code
+        description: The source code being mapped (e.g., HL7 race code, gender code).
+        data_type: STRING
+        data_tests:
+          - not_null
+      - name: source_concept_id
+        description: "OMOP concept_id for the source code (0 if no custom concept row exists)."
+        data_type: integer
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: source_vocabulary_id
+        description: Vocabulary of the source code (e.g., HL7 Race, FHIR Gender).
+        data_type: STRING
+        data_tests:
+          - not_null
+      - name: source_code_description
+        description: Human-readable display name of the source code.
+        data_type: STRING
+      - name: target_concept_id
+        description: OMOP standard concept_id the source code maps to (0 if unmapped).
+        data_type: integer
+        data_tests:
+          - not_null
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]
+      - name: target_vocabulary_id
+        description: Vocabulary of the target standard concept.
+        data_type: STRING
+      - name: valid_start_date
+        description: Date from which this mapping is valid.
+        data_type: date
+      - name: valid_end_date
+        description: Date after which this mapping is no longer valid.
+        data_type: date
+      - name: invalid_reason
+        description: NULL if active, otherwise reason for invalidation.
+        data_type: STRING
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - source_code
+              - source_vocabulary_id
+
+  - name: omop__vocabulary
+    description: >
+      OMOP CDM v5.4 Vocabulary table — metadata about each loaded vocabulary.
+    columns:
+      - name: vocabulary_id
+        description: Short identifier (e.g., SNOMED, RxNorm, LOINC).
+        data_type: STRING
+        data_tests:
+          - unique
+      - name: vocabulary_name
+        description: Full name of the vocabulary.
+        data_type: STRING
+      - name: vocabulary_reference
+        description: URL or citation for the vocabulary source.
+        data_type: STRING
+      - name: vocabulary_version
+        description: Version string of the loaded vocabulary.
+        data_type: STRING
+      - name: vocabulary_concept_id
+        description: Self-referencing concept_id for this vocabulary entry.
+        data_type: integer
+        constraints:
+          - type: foreign_key
+            to: ref('omop__concept')
+            to_columns: [concept_id]

@@ -1,0 +1,17 @@
+config {
+  type: "table"
+}
+
+SELECT
+4208087 AS observation_concept_id,
+
+* EXCEPT(observation_concept_id)
+FROM ${ref("norm_observation")}
+WHERE
+  LOWER(TRIM(REGEXP_EXTRACT(TRIM(observation_source_code), r'([^/]+)$')))
+  IN (
+"05717ebe2050c2e9059faac210de7c4551a748db63db2a7cea0e9394c8c2e688",
+"f44d79d857d008f2c64b3e3e8191893a449c322cb6d7f695b6aed9b2d779bdbf"
+)
+OR
+LOWER(observation_source_value) like "%hyperploidy%"
